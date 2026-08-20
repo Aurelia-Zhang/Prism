@@ -1,0 +1,26 @@
+# Build artifacts
+/prism
+/bin/
+*.exe
+*.test
+*.out
+
+# Local runtime data
+*.db
+*.db-wal
+*.db-shm
+/data/
+/traces/
+/.prism/
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
