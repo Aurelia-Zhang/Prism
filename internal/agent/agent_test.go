@@ -92,8 +92,11 @@ func TestRunFeedsSingleToolResultBack(t *testing.T) {
 	if len(secondCall) != 3 || secondCall[2].Role != provider.RoleTool || len(secondCall[2].ToolResults) != 1 || secondCall[2].ToolResults[0].Content != `{"value":"ok"}` {
 		t.Fatalf("tool result was not fed back: %#v", secondCall)
 	}
-	if result.Trace.Spans[2].ParentSpanID != result.Trace.Spans[1].ID || result.Trace.Spans[2].Status != trace.StatusOK {
+	if result.Trace.Spans[1].ParentSpanID != result.Trace.Spans[0].ID || result.Trace.Spans[2].ParentSpanID != result.Trace.Spans[0].ID || result.Trace.Spans[2].Status != trace.StatusOK {
 		t.Fatalf("tool span parent/status incorrect: %#v", result.Trace)
+	}
+	if result.Trace.Spans[2].Attributes["tool.name"] != "echo" || result.Trace.Spans[2].Attributes["tool.call_id"] != "c1" || result.Trace.Spans[2].Attributes["agent.round"] != "1" {
+		t.Fatalf("tool span attributes are incomplete: %#v", result.Trace.Spans[2].Attributes)
 	}
 	assertTraceFinished(t, result.Trace)
 }
@@ -156,21 +159,26 @@ func TestRunFeedsValidationFailureAndHandlerFailureBack(t *testing.T) {
 	var invoked int
 	if err := registry.Register(tool.Tool{Name: "strict", Schema: json.RawMessage(`{"type":"object","properties":{"value":{"type":"string"}},"required":["value"]}`), Handler: func(context.Context, json.RawMessage) (string, error) {
 		invoked++
-		return "should not run", nil
+		return "corrected result", nil
 	}}); err != nil {
 		t.Fatal(err)
 	}
 	fake := &fakeProvider{responses: []provider.Response{
 		callResponse(provider.ToolCall{ID: "bad", Name: "strict", Arguments: json.RawMessage(`{"value":7}`)}),
+		callResponse(provider.ToolCall{ID: "good", Name: "strict", Arguments: json.RawMessage(`{"value":"fixed"}`)}),
 		textResponse("corrected"),
 	}}
-	result, err := newRunner(t, fake, registry, 2).Run(context.Background(), nil)
-	if err != nil || invoked != 0 {
-		t.Fatalf("validation should be feedback, not invocation: result=%#v err=%v invoked=%d", result, err, invoked)
+	result, err := newRunner(t, fake, registry, 3).Run(context.Background(), nil)
+	if err != nil || invoked != 1 || len(fake.calls) != 3 {
+		t.Fatalf("validation should be corrected and invoked: result=%#v err=%v invoked=%d calls=%d", result, err, invoked, len(fake.calls))
 	}
 	feedback := fake.callMessages(1)[1].ToolResults[0]
 	if feedback.Error == nil || feedback.Error.Code != "tool_arguments_schema_invalid" {
 		t.Fatalf("missing validation feedback: %#v", feedback)
+	}
+	correctedInput := fake.callMessages(2)
+	if len(correctedInput) != 4 || correctedInput[3].ToolResults[0].Content != "corrected result" {
+		t.Fatalf("corrected tool result was not fed back: %#v", correctedInput)
 	}
 
 	failing := tool.NewRegistry()
@@ -216,7 +224,7 @@ func TestRunCancellationAndMaxRounds(t *testing.T) {
 	if err := registry.Register(tool.Tool{Name: "again", Schema: json.RawMessage(`{}`), Handler: func(context.Context, json.RawMessage) (string, error) { return "ok", nil }}); err != nil {
 		t.Fatal(err)
 	}
-	fake := &fakeProvider{responses: []provider.Response{callResponse(provider.ToolCall{Name: "again", Arguments: json.RawMessage(`{}`)}), callResponse(provider.ToolCall{Name: "again", Arguments: json.RawMessage(`{}`)})}}
+	fake := &fakeProvider{responses: []provider.Response{callResponse(provider.ToolCall{ID: "again-1", Name: "again", Arguments: json.RawMessage(`{}`)}), callResponse(provider.ToolCall{ID: "again-2", Name: "again", Arguments: json.RawMessage(`{}`)})}}
 	result, err = newRunner(t, fake, registry, 2).Run(context.Background(), nil)
 	if err == nil || err.(*provider.Error).Code != "max_rounds_exceeded" {
 		t.Fatalf("max rounds boundary was not enforced: %v", err)
@@ -227,12 +235,89 @@ func TestRunCancellationAndMaxRounds(t *testing.T) {
 	assertTraceFinished(t, result.Trace)
 }
 
+func TestRunChecksStopReasonAndOutputConsistency(t *testing.T) {
+	validCall := provider.ToolCall{ID: "valid", Name: "echo", Arguments: json.RawMessage(`{}`)}
+	tests := []struct {
+		name        string
+		response    provider.Response
+		wantCode    string
+		wantSuccess bool
+	}{
+		{name: "end turn", response: textResponse("done"), wantSuccess: true},
+		{name: "valid tool call", response: callResponse(validCall), wantSuccess: true},
+		{name: "end turn with tool", response: provider.Response{Output: []provider.OutputItem{{Kind: provider.OutputToolCall, ToolCall: &validCall}}, StopReason: provider.StopReasonEndTurn}, wantCode: "invalid_provider_output"},
+		{name: "tool call without output", response: provider.Response{StopReason: provider.StopReasonToolCall}, wantCode: "invalid_provider_output"},
+		{name: "tool call with nil item", response: provider.Response{Output: []provider.OutputItem{{Kind: provider.OutputToolCall}}, StopReason: provider.StopReasonToolCall}, wantCode: "invalid_provider_output"},
+		{name: "error", response: provider.Response{StopReason: provider.StopReasonError}, wantCode: "provider_error_response"},
+		{name: "canceled", response: provider.Response{StopReason: provider.StopReasonCanceled}, wantCode: "provider_canceled"},
+		{name: "unknown", response: provider.Response{StopReason: provider.StopReason("future_reason")}, wantCode: "invalid_stop_reason"},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			registry := tool.NewRegistry()
+			if err := registry.Register(tool.Tool{Name: "echo", Schema: json.RawMessage(`{}`), Handler: func(context.Context, json.RawMessage) (string, error) { return "ok", nil }}); err != nil {
+				t.Fatal(err)
+			}
+			responses := []provider.Response{testCase.response}
+			if testCase.wantSuccess {
+				responses = append(responses, textResponse("done"))
+			}
+			fake := &fakeProvider{responses: responses}
+			_, err := newRunner(t, fake, registry, 2).Run(context.Background(), nil)
+			if testCase.wantSuccess {
+				if err != nil {
+					t.Fatalf("valid response failed: %v", err)
+				}
+				return
+			}
+			structured, ok := err.(*provider.Error)
+			if !ok || structured.Code != testCase.wantCode {
+				t.Fatalf("got error=%v, want code %q", err, testCase.wantCode)
+			}
+		})
+	}
+}
+
+func TestRunDoesNotCallProviderWhenAlreadyCanceledAndChecksAfterCall(t *testing.T) {
+	preCanceled := &fakeProvider{responses: []provider.Response{textResponse("must not run")}}
+	preContext, cancel := context.WithCancel(context.Background())
+	cancel()
+	result, err := newRunner(t, preCanceled, tool.NewRegistry(), 1).Run(preContext, nil)
+	if err == nil || !errors.Is(err, context.Canceled) || len(preCanceled.calls) != 0 {
+		t.Fatalf("pre-canceled context called provider or returned success: err=%v calls=%d", err, len(preCanceled.calls))
+	}
+	if result.Trace.Spans[1].Status != trace.StatusError || result.Trace.Spans[0].Status != trace.StatusError {
+		t.Fatalf("pre-canceled spans were not ended as errors: %#v", result.Trace)
+	}
+
+	postContext, postCancel := context.WithCancel(context.Background())
+	postCanceled := &cancelingProvider{cancel: postCancel}
+	result, err = newRunner(t, postCanceled, tool.NewRegistry(), 1).Run(postContext, nil)
+	if err == nil || !errors.Is(err, context.Canceled) || postCanceled.calls != 1 {
+		t.Fatalf("post-call cancellation was ignored: err=%v calls=%d", err, postCanceled.calls)
+	}
+	if result.Trace.Spans[1].Status != trace.StatusError || result.Trace.Spans[0].Status != trace.StatusError {
+		t.Fatalf("post-canceled spans were not ended as errors: %#v", result.Trace)
+	}
+}
+
 type blockingProvider struct{ started chan struct{} }
 
 func (p *blockingProvider) Complete(ctx context.Context, _ []provider.Message, _ []provider.ToolDefinition) (provider.Response, error) {
 	close(p.started)
 	<-ctx.Done()
 	return provider.Response{}, ctx.Err()
+}
+
+type cancelingProvider struct {
+	calls  int
+	cancel context.CancelFunc
+}
+
+func (p *cancelingProvider) Complete(ctx context.Context, _ []provider.Message, _ []provider.ToolDefinition) (provider.Response, error) {
+	p.calls++
+	p.cancel()
+	return textResponse("must be rejected"), nil
 }
 
 func assertTraceFinished(t *testing.T, snapshot trace.Snapshot) {
@@ -272,6 +357,7 @@ func TestTraceArtifact(t *testing.T) {
 	}
 	fake := &fakeProvider{responses: []provider.Response{
 		{Output: []provider.OutputItem{{Kind: provider.OutputToolCall, ToolCall: &provider.ToolCall{ID: "invalid", Name: "strict", Arguments: json.RawMessage(`{"value":9}`)}}}, Usage: provider.Usage{InputTokens: 10, OutputTokens: 2, CacheReadTokens: 1, CacheWriteTokens: 1}, StopReason: provider.StopReasonToolCall},
+		{Output: []provider.OutputItem{{Kind: provider.OutputToolCall, ToolCall: &provider.ToolCall{ID: "corrected-call", Name: "strict", Arguments: json.RawMessage(`{"value":"fixed"}`)}}}, Usage: provider.Usage{InputTokens: 7, OutputTokens: 2}, StopReason: provider.StopReasonToolCall},
 		{Output: []provider.OutputItem{{Kind: provider.OutputToolCall, ToolCall: &provider.ToolCall{ID: "alpha-call", Name: "alpha", Arguments: json.RawMessage(`{}`)}}, {Kind: provider.OutputToolCall, ToolCall: &provider.ToolCall{ID: "beta-call", Name: "beta", Arguments: json.RawMessage(`{}`)}}}, Usage: provider.Usage{InputTokens: 12, OutputTokens: 4}, StopReason: provider.StopReasonToolCall},
 		{Output: []provider.OutputItem{{Kind: provider.OutputText, Text: "complete"}}, Usage: provider.Usage{InputTokens: 8, OutputTokens: 3}, StopReason: provider.StopReasonEndTurn},
 	}}
@@ -284,7 +370,7 @@ func TestTraceArtifact(t *testing.T) {
 	var result Result
 	var err error
 	go func() {
-		result, err = NewRunner(fake, registry, recorder, 3).Run(context.Background(), nil)
+		result, err = NewRunner(fake, registry, recorder, 4).Run(context.Background(), nil)
 		close(resultDone)
 	}()
 	<-started
@@ -321,11 +407,11 @@ func TestTraceArtifact(t *testing.T) {
 	if string(want) != string(encoded) {
 		t.Fatalf("trace artifact differs; run go test ./internal/agent -run TestTraceArtifact -update-trace-artifact")
 	}
-	if result.Messages[1].ToolResults[0].Error == nil || result.Messages[3].ToolResults[0].ToolCallID != "alpha-call" {
+	if result.Messages[1].ToolResults[0].Error == nil || result.Messages[3].ToolResults[0].Content != "strict result" || result.Messages[5].ToolResults[0].ToolCallID != "alpha-call" {
 		t.Fatalf("artifact path did not preserve validation feedback and tool order: %#v", result.Messages)
 	}
 	root := result.Trace.Spans[0]
-	if root.Usage.InputTokens != 30 || root.Usage.OutputTokens != 9 || root.Usage.CacheReadTokens != 1 || root.Usage.CacheWriteTokens != 1 {
+	if root.Usage.InputTokens != 37 || root.Usage.OutputTokens != 11 || root.Usage.CacheReadTokens != 1 || root.Usage.CacheWriteTokens != 1 {
 		t.Fatalf("artifact path did not aggregate usage: %#v", root.Usage)
 	}
 }

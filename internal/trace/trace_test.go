@@ -18,7 +18,9 @@ func TestSpanParentLifecycleAndFirstWins(t *testing.T) {
 	})
 	run := recorder.StartRun()
 	child := run.Root().StartChild("model.call")
-	grandchild := child.StartChild("tool.call")
+	attributes := Attributes{"tool.name": "weather", "agent.round": "1"}
+	grandchild := run.Root().StartChildWithAttributes("tool.call", attributes)
+	attributes["tool.name"] = "changed-after-start"
 	child.End(StatusOK, nil, provider.Usage{InputTokens: 7, OutputTokens: 3})
 	child.End(StatusError, provider.NewError("late", "must be ignored"), provider.Usage{InputTokens: 99})
 	grandchild.End(StatusError, provider.NewError("bad_args", "invalid"), provider.Usage{})
@@ -28,8 +30,11 @@ func TestSpanParentLifecycleAndFirstWins(t *testing.T) {
 	if len(snapshot.Spans) != 3 {
 		t.Fatalf("got %d spans, want 3", len(snapshot.Spans))
 	}
-	if snapshot.Spans[1].ParentSpanID != snapshot.Spans[0].ID || snapshot.Spans[2].ParentSpanID != snapshot.Spans[1].ID {
+	if snapshot.Spans[1].ParentSpanID != snapshot.Spans[0].ID || snapshot.Spans[2].ParentSpanID != snapshot.Spans[0].ID {
 		t.Fatalf("unexpected parent chain: %#v", snapshot.Spans)
+	}
+	if snapshot.Spans[2].Attributes["tool.name"] != "weather" {
+		t.Fatalf("span attributes were not detached at start: %#v", snapshot.Spans[2].Attributes)
 	}
 	if snapshot.Spans[1].Status != StatusOK || snapshot.Spans[1].Usage.InputTokens != 7 {
 		t.Fatalf("first terminal state was overwritten: %#v", snapshot.Spans[1])
@@ -55,8 +60,12 @@ func TestSnapshotIsDeepCopy(t *testing.T) {
 	snapshot.Spans[0].Error.Message = "changed"
 	snapshot.Spans[0].Usage.InputTokens = 99
 	snapshot.Spans[0].Status = StatusOK
+	child := run.Root().StartChildWithAttributes("tool.call", Attributes{"tool.name": "original"})
+	child.End(StatusOK, nil, provider.Usage{})
+	snapshot = run.Snapshot()
+	snapshot.Spans[1].Attributes["tool.name"] = "changed"
 	again := run.Snapshot()
-	if again.Spans[0].Error.Message != "original" || again.Spans[0].Usage.InputTokens != 1 || again.Spans[0].Status != StatusError {
+	if again.Spans[0].Error.Message != "original" || again.Spans[0].Usage.InputTokens != 1 || again.Spans[0].Status != StatusError || again.Spans[1].Attributes["tool.name"] != "original" {
 		t.Fatalf("snapshot mutation changed recorder state: %#v", again.Spans[0])
 	}
 }

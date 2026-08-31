@@ -26,6 +26,9 @@ type Options struct {
 	IDGenerator func() string
 }
 
+// Attributes are small string-valued span annotations.
+type Attributes map[string]string
+
 type spanState struct {
 	id            string
 	name          string
@@ -37,6 +40,7 @@ type spanState struct {
 	endSequence   uint64
 	usage         provider.Usage
 	err           *provider.Error
+	attributes    Attributes
 }
 
 // Recorder stores spans for one or more runs in memory.
@@ -94,6 +98,7 @@ type SpanSnapshot struct {
 	EndSequence   uint64          `json:"end_sequence,omitempty"`
 	Usage         provider.Usage  `json:"usage"`
 	Error         *provider.Error `json:"error,omitempty"`
+	Attributes    Attributes      `json:"attributes,omitempty"`
 }
 
 // Snapshot is a deep copy of all spans in one run, ordered by start sequence.
@@ -103,7 +108,7 @@ type Snapshot struct {
 
 // StartRun creates the agent.run root span.
 func (r *Recorder) StartRun() *Run {
-	root := r.startSpan("agent.run", "")
+	root := r.startSpan("agent.run", "", nil)
 	return &Run{recorder: r, rootID: root.id}
 }
 
@@ -117,7 +122,7 @@ func (r *Run) Snapshot() Snapshot {
 	return r.recorder.snapshot(r.rootID)
 }
 
-func (r *Recorder) startSpan(name, parentID string) *Span {
+func (r *Recorder) startSpan(name, parentID string, attributes Attributes) *Span {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.nextStart++
@@ -129,6 +134,7 @@ func (r *Recorder) startSpan(name, parentID string) *Span {
 		status:        StatusRunning,
 		startTime:     r.clock(),
 		startSequence: r.nextStart,
+		attributes:    cloneAttributes(attributes),
 	}
 	r.spans[id] = state
 	return &Span{recorder: r, id: id}
@@ -136,7 +142,12 @@ func (r *Recorder) startSpan(name, parentID string) *Span {
 
 // StartChild creates a running child span.
 func (s *Span) StartChild(name string) *Span {
-	return s.recorder.startSpan(name, s.id)
+	return s.StartChildWithAttributes(name, nil)
+}
+
+// StartChildWithAttributes creates a running child span with detached attributes.
+func (s *Span) StartChildWithAttributes(name string, attributes Attributes) *Span {
+	return s.recorder.startSpan(name, s.id, attributes)
 }
 
 // End finishes a span. A repeated call is ignored, preserving the first terminal state.
@@ -156,6 +167,17 @@ func (s *Span) End(status Status, err *provider.Error, usage provider.Usage) {
 	state.endTime = s.recorder.clock()
 	state.usage = usage
 	state.err = cloneError(err)
+}
+
+func cloneAttributes(attributes Attributes) Attributes {
+	if attributes == nil {
+		return nil
+	}
+	cloned := make(Attributes, len(attributes))
+	for key, value := range attributes {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func (r *Recorder) snapshot(rootID string) Snapshot {
@@ -185,6 +207,7 @@ func (r *Recorder) snapshot(rootID string) Snapshot {
 			EndSequence:   state.endSequence,
 			Usage:         state.usage,
 			Error:         cloneError(state.err),
+			Attributes:    cloneAttributes(state.attributes),
 		})
 	}
 	return snapshot
