@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // Role identifies the author of a message.
@@ -24,6 +25,7 @@ type OutputKind string
 const (
 	OutputText     OutputKind = "text"
 	OutputToolCall OutputKind = "tool_call"
+	OutputOpaque   OutputKind = "opaque"
 )
 
 // ToolCall is an ordered request from the model to invoke a tool.
@@ -35,17 +37,31 @@ type ToolCall struct {
 
 // OutputItem preserves the order of text and tool-call items returned by a model.
 type OutputItem struct {
-	Kind     OutputKind `json:"kind"`
-	Text     string     `json:"text,omitempty"`
-	ToolCall *ToolCall  `json:"tool_call,omitempty"`
+	Kind     OutputKind  `json:"kind"`
+	Text     string      `json:"text,omitempty"`
+	ToolCall *ToolCall   `json:"tool_call,omitempty"`
+	Opaque   *OpaqueItem `json:"opaque,omitempty"`
 }
+
+// OpaqueItem is provider-owned continuation data. The runtime stores and
+// returns it without interpreting protocol-specific fields.
+type OpaqueItem struct {
+	Provider string          `json:"provider"`
+	Type     string          `json:"type"`
+	ID       string          `json:"id,omitempty"`
+	Raw      json.RawMessage `json:"raw"`
+}
+
+// OpaqueProviderItem is a descriptive alias for OpaqueItem.
+type OpaqueProviderItem = OpaqueItem
 
 // Error is a structured runtime error that can be returned to a caller or model.
 type Error struct {
-	Code      string `json:"code"`
-	Message   string `json:"message"`
-	Retryable bool   `json:"retryable,omitempty"`
-	Cause     error  `json:"-"`
+	Code       string        `json:"code"`
+	Message    string        `json:"message"`
+	Retryable  bool          `json:"retryable,omitempty"`
+	RetryAfter time.Duration `json:"-"`
+	Cause      error         `json:"-"`
 }
 
 // Error implements error.
@@ -142,4 +158,48 @@ type Response struct {
 // Provider is the only capability required by the agent loop.
 type Provider interface {
 	Complete(context.Context, []Message, []ToolDefinition) (Response, error)
+}
+
+// StreamEventKind identifies a normalized streaming observation.
+type StreamEventKind string
+
+const (
+	EventTextDelta     StreamEventKind = "text_delta"
+	EventToolArguments StreamEventKind = "tool_arguments_delta"
+	EventCompletedItem StreamEventKind = "completed_item"
+	EventUsage         StreamEventKind = "usage"
+	EventAttempt       StreamEventKind = "attempt"
+)
+
+// StreamEvent is deliberately small and provider-neutral. Item contains an
+// opaque continuation when the provider requires one for a later request.
+type StreamEvent struct {
+	Kind           StreamEventKind
+	Text           string
+	ItemID         string
+	ToolCallID     string
+	ToolName       string
+	ArgumentsDelta string
+	Item           OutputItem
+	Usage          Usage
+	Attempt        Attempt
+}
+
+// EventSink receives normalized streaming events. Returning an error stops the
+// stream and is also returned by the Provider.
+type EventSink func(StreamEvent) error
+
+// StreamingProvider is optional; Providers that do not implement it continue
+// to work through Complete.
+type StreamingProvider interface {
+	Provider
+	Stream(context.Context, []Message, []ToolDefinition, EventSink) (Response, error)
+}
+
+// Attempt describes one provider request attempt for Trace or diagnostics.
+type Attempt struct {
+	Provider string
+	Model    string
+	Number   int
+	Error    *Error
 }

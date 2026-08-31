@@ -24,6 +24,24 @@ type fakeProvider struct {
 	calls     [][]provider.Message
 }
 
+type streamingFakeProvider struct {
+	response provider.Response
+}
+
+func (p *streamingFakeProvider) Complete(context.Context, []provider.Message, []provider.ToolDefinition) (provider.Response, error) {
+	return p.response, nil
+}
+
+func (p *streamingFakeProvider) Stream(_ context.Context, _ []provider.Message, _ []provider.ToolDefinition, sink provider.EventSink) (provider.Response, error) {
+	if err := sink(provider.StreamEvent{Kind: provider.EventAttempt, Attempt: provider.Attempt{Provider: "fixture", Model: "fixture-model", Number: 1}}); err != nil {
+		return provider.Response{}, err
+	}
+	if err := sink(provider.StreamEvent{Kind: provider.EventTextDelta, Text: "hello"}); err != nil {
+		return provider.Response{}, err
+	}
+	return p.response, nil
+}
+
 func (p *fakeProvider) Complete(_ context.Context, messages []provider.Message, _ []provider.ToolDefinition) (provider.Response, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -72,6 +90,22 @@ func TestRunStopsNormallyWithoutTools(t *testing.T) {
 	assertTraceFinished(t, result.Trace)
 	if result.Trace.Spans[0].Status != trace.StatusOK || result.Trace.Spans[1].Name != "model.call" {
 		t.Fatalf("unexpected trace: %#v", result.Trace)
+	}
+}
+
+func TestRunUsesOptionalStreamingProviderAndEventSink(t *testing.T) {
+	fake := &streamingFakeProvider{response: textResponse("hello")}
+	var events []provider.StreamEvent
+	result, err := newRunner(t, fake, tool.NewRegistry(), 1).Run(context.Background(), nil, WithEventSink(func(event provider.StreamEvent) error {
+		events = append(events, event)
+		return nil
+	}))
+	if err != nil || len(events) != 2 || events[0].Kind != provider.EventAttempt || events[1].Kind != provider.EventTextDelta {
+		t.Fatalf("streaming path did not preserve events: events=%#v err=%v", events, err)
+	}
+	model := result.Trace.Spans[1]
+	if model.Attributes["provider"] != "fixture" || model.Attributes["model"] != "fixture-model" || model.Attributes["attempt"] != "1" {
+		t.Fatalf("streaming attempt was not traced: %#v", model)
 	}
 }
 

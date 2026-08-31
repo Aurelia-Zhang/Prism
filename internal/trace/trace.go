@@ -150,6 +150,31 @@ func (s *Span) StartChildWithAttributes(name string, attributes Attributes) *Spa
 	return s.recorder.startSpan(name, s.id, attributes)
 }
 
+// SetAttribute records or replaces an attribute while the span is running.
+func (s *Span) SetAttribute(key, value string) {
+	s.recorder.mu.Lock()
+	defer s.recorder.mu.Unlock()
+	state, ok := s.recorder.spans[s.id]
+	if !ok || state.status != StatusRunning {
+		return
+	}
+	if state.attributes == nil {
+		state.attributes = make(Attributes)
+	}
+	state.attributes[key] = value
+}
+
+// DeleteAttribute removes an attribute while the span is running.
+func (s *Span) DeleteAttribute(key string) {
+	s.recorder.mu.Lock()
+	defer s.recorder.mu.Unlock()
+	state, ok := s.recorder.spans[s.id]
+	if !ok || state.status != StatusRunning || state.attributes == nil {
+		return
+	}
+	delete(state.attributes, key)
+}
+
 // End finishes a span. A repeated call is ignored, preserving the first terminal state.
 func (s *Span) End(status Status, err *provider.Error, usage provider.Usage) {
 	s.recorder.mu.Lock()
