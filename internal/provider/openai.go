@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+const openAIDefaultBaseURL = "https://api.openai.com/v1"
+
 // OpenAIConfig configures the Responses API adapter.
 type OpenAIConfig struct {
 	BaseURL    string
@@ -81,11 +83,17 @@ func (p *OpenAIResponses) Stream(ctx context.Context, messages []Message, tools 
 }
 
 func (p *OpenAIResponses) streamAttempt(ctx context.Context, messages []Message, tools []ToolDefinition, sink EventSink) (Response, bool, error) {
-	body, err := json.Marshal(openAIRequest{Model: p.config.Model, Input: openAIInput(messages), Tools: openAITools(tools), Stream: true})
+	body, err := json.Marshal(openAIRequest{
+		Model:   p.config.Model,
+		Input:   openAIInput(messages),
+		Tools:   openAITools(tools),
+		Include: []string{"reasoning.encrypted_content"},
+		Stream:  true,
+	})
 	if err != nil {
 		return Response{}, false, &Error{Code: "invalid_request", Message: err.Error(), Cause: err}
 	}
-	url, err := providerEndpoint(p.config.BaseURL, "responses")
+	url, err := providerEndpoint(p.config.BaseURL, openAIDefaultBaseURL, "responses")
 	if err != nil {
 		return Response{}, false, &Error{Code: "invalid_request", Message: err.Error(), Cause: err}
 	}
@@ -126,10 +134,10 @@ func (p *OpenAIResponses) streamAttempt(ctx context.Context, messages []Message,
 	return state.response(), state.emitted, nil
 }
 
-func providerEndpoint(base, resource string) (string, error) {
+func providerEndpoint(base, defaultBase, resource string) (string, error) {
 	base = strings.TrimRight(base, "/")
 	if base == "" {
-		base = "https://api.openai.com/v1"
+		base = defaultBase
 	}
 	if strings.HasSuffix(base, "/responses") || strings.HasSuffix(base, "/messages") {
 		return base, nil
@@ -141,10 +149,11 @@ func providerEndpoint(base, resource string) (string, error) {
 }
 
 type openAIRequest struct {
-	Model  string           `json:"model"`
-	Input  []map[string]any `json:"input"`
-	Tools  []map[string]any `json:"tools,omitempty"`
-	Stream bool             `json:"stream"`
+	Model   string           `json:"model"`
+	Input   []map[string]any `json:"input"`
+	Tools   []map[string]any `json:"tools,omitempty"`
+	Include []string         `json:"include,omitempty"`
+	Stream  bool             `json:"stream"`
 }
 
 func openAITools(definitions []ToolDefinition) []map[string]any {
@@ -168,7 +177,7 @@ func openAIInput(messages []Message) []map[string]any {
 		for _, item := range message.OutputItems {
 			switch item.Kind {
 			case OutputOpaque:
-				if item.Opaque != nil && len(item.Opaque.Raw) != 0 {
+				if item.Opaque != nil && item.Opaque.Provider == "openai" && len(item.Opaque.Raw) != 0 {
 					var raw map[string]any
 					if json.Unmarshal(item.Opaque.Raw, &raw) == nil {
 						input = append(input, raw)

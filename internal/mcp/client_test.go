@@ -1,4 +1,4 @@
-package mcp_test
+package mcp
 
 import (
 	"bufio"
@@ -7,14 +7,34 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/Aurelia-Zhang/Prism/internal/mcp"
 	"github.com/Aurelia-Zhang/Prism/internal/provider"
 	"github.com/Aurelia-Zhang/Prism/internal/tool"
 )
+
+const mcpScenarioArtifact = `# MCP Local Subprocess Scenarios
+
+Evidence class: normalized per-scenario summary checked against ` + "`internal/mcp`" + ` tests. Each scenario
+starts a separate real child process and therefore restarts request IDs at 1. This is not a
+byte-for-byte capture and is not evidence of compatibility with a third-party MCP server.
+
+` + "```text" + `
+lifecycle session: initialize(id=1) -> initialized -> tools/list(id=2) -> tools/call(id=3, echo) -> result(id=3)
+cancellation session: initialize(id=1) -> initialized -> tools/list(id=2) -> tools/call(id=3, wait) -> notifications/cancelled(requestId=3)
+exit session: initialize(id=1) -> initialized -> tools/list(id=2) -> server exit -> bounded stderr -> remove only mcp.exit-fixture.*
+rpc-error session: initialize(id=1) -> initialized -> tools/list(id=2) -> error(id=2, code=-32001)
+` + "```" + `
+
+` + "`TestMCPScenarioArtifact`" + ` checks this file for drift. The subprocess tests cover initialization,
+discovery, call results, JSON-RPC errors, cancellation, completed-request cleanup, bounded stderr,
+process exit, and per-server tool removal. The external smoke is opt-in through
+` + "`PRISM_MCP_EXTERNAL_COMMAND`" + ` and was not run in the default environment.
+`
 
 func TestMain(m *testing.M) {
 	if os.Getenv("PRISM_MCP_FIXTURE") == "1" {
@@ -24,9 +44,9 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func fixtureClient(t *testing.T, registry *tool.Registry, mode string) *mcp.Client {
+func fixtureClient(t *testing.T, registry *tool.Registry, mode string) *Client {
 	t.Helper()
-	client, err := mcp.NewClient(registry, mcp.Config{
+	client, err := NewClient(registry, Config{
 		Name:    "fixture",
 		Command: os.Args[0],
 		Args:    []string{"-test.run=TestMCPFixtureProcess"},
@@ -68,13 +88,19 @@ func TestClientLifecycleListAndCall(t *testing.T) {
 	if err != nil || result.Error != nil || result.Content != `called echo with {"value":"ok"}` {
 		t.Fatalf("MCP call failed: result=%#v err=%v", result, err)
 	}
+	client.mu.Lock()
+	pending := len(client.pending)
+	client.mu.Unlock()
+	if pending != 0 {
+		t.Fatalf("completed requests remained pending: %d", pending)
+	}
 }
 
 func TestClientProtocolError(t *testing.T) {
 	registry := tool.NewRegistry()
 	client := fixtureClient(t, registry, "protocol-error")
 	err := client.Start(context.Background())
-	var protocolErr *mcp.RPCError
+	var protocolErr *RPCError
 	if !errors.As(err, &protocolErr) || protocolErr.Code != -32001 {
 		t.Fatalf("expected JSON-RPC error, got %v", err)
 	}
@@ -88,7 +114,7 @@ func TestClientExitRemovesOwnToolsAndBoundsStderr(t *testing.T) {
 	if err := registry.Register(tool.Tool{Name: "local", Schema: json.RawMessage(`{}`), Handler: func(context.Context, json.RawMessage) (string, error) { return "local", nil }}); err != nil {
 		t.Fatal(err)
 	}
-	client, err := mcp.NewClient(registry, mcp.Config{
+	client, err := NewClient(registry, Config{
 		Name:            "exit-fixture",
 		Command:         os.Args[0],
 		Args:            []string{"-test.run=TestMCPFixtureProcess"},
@@ -103,7 +129,7 @@ func TestClientExitRemovesOwnToolsAndBoundsStderr(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = client.Wait()
-	var exitErr *mcp.ExitError
+	var exitErr *ExitError
 	if !errors.As(err, &exitErr) {
 		t.Fatalf("expected exit error, got %v", err)
 	}
@@ -129,6 +155,18 @@ func TestClientCallCancellation(t *testing.T) {
 	_, err := client.Call(ctx, "mcp.fixture.wait", json.RawMessage(`{}`))
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected cancellation, got %v", err)
+	}
+}
+
+func TestMCPScenarioArtifact(t *testing.T) {
+	_, currentFile, _, _ := runtime.Caller(0)
+	artifactPath := filepath.Join(filepath.Dir(currentFile), "..", "..", "docs", "evidence", "t2", "mcp-subprocess-transcript.md")
+	actual, err := os.ReadFile(artifactPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(actual) != mcpScenarioArtifact {
+		t.Fatalf("MCP scenario artifact differs from the tested scenario summary")
 	}
 }
 

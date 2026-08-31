@@ -8,6 +8,8 @@ import (
 	"strings"
 )
 
+const anthropicDefaultBaseURL = "https://api.anthropic.com/v1"
+
 // AnthropicConfig configures the Messages API adapter.
 type AnthropicConfig struct {
 	BaseURL          string
@@ -95,7 +97,7 @@ func (p *AnthropicMessages) streamAttempt(ctx context.Context, messages []Messag
 	if err != nil {
 		return Response{}, false, &Error{Code: "invalid_request", Message: err.Error(), Cause: err}
 	}
-	url, err := providerEndpoint(p.config.BaseURL, "messages")
+	url, err := providerEndpoint(p.config.BaseURL, anthropicDefaultBaseURL, "messages")
 	if err != nil {
 		return Response{}, false, &Error{Code: "invalid_request", Message: err.Error(), Cause: err}
 	}
@@ -179,7 +181,7 @@ func anthropicMessages(messages []Message) []map[string]any {
 					blocks = append(blocks, map[string]any{"type": "tool_use", "id": item.ToolCall.ID, "name": item.ToolCall.Name, "input": input})
 				}
 			case OutputOpaque:
-				if item.Opaque != nil && len(item.Opaque.Raw) != 0 {
+				if item.Opaque != nil && item.Opaque.Provider == "anthropic" && len(item.Opaque.Raw) != 0 {
 					var raw map[string]any
 					if json.Unmarshal(item.Opaque.Raw, &raw) == nil {
 						blocks = append(blocks, raw)
@@ -271,10 +273,15 @@ func (s *anthropicStreamState) handle(event sseEvent) error {
 			s.stop = StopReasonEndTurn
 		}
 		return s.terminal(1, nil)
+	case "ping":
+		return nil
 	case "error":
 		return s.terminal(3, anthropicEventError(payload))
 	default:
-		return streamProtocolError("unsupported Anthropic event " + event.Name)
+		// New top-level envelope events are safe to ignore. Unknown content
+		// blocks and deltas remain explicit errors because dropping them could
+		// corrupt provider continuation state.
+		return nil
 	}
 	return nil
 }
@@ -383,7 +390,7 @@ func (s *anthropicStreamState) setStopReason(reason string) {
 	case "tool_use":
 		s.stop = StopReasonToolCall
 	case "max_tokens":
-		s.stop = StopReasonMaxRound
+		s.stop = StopReasonMaxTokens
 	case "end_turn", "stop_sequence", "":
 		if s.stop == "" {
 			s.stop = StopReasonEndTurn

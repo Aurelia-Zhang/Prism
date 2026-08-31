@@ -40,8 +40,9 @@ func NewRunner(provider provider.Provider, tools *tool.Registry, recorder *trace
 
 // Result contains the conversation and the complete trace for a run.
 type Result struct {
-	Messages []provider.Message `json:"messages"`
-	Trace    trace.Snapshot     `json:"trace"`
+	Messages   []provider.Message  `json:"messages"`
+	StopReason provider.StopReason `json:"stop_reason,omitempty"`
+	Trace      trace.Snapshot      `json:"trace"`
 }
 
 // Run executes the loop until normal completion, cancellation, a fatal provider
@@ -112,7 +113,7 @@ func (r *Runner) Run(ctx context.Context, messages []provider.Message, options .
 		})
 
 		if len(calls) == 0 {
-			return Result{Messages: conversation}, nil
+			return Result{Messages: conversation, StopReason: response.StopReason}, nil
 		}
 		results, err := r.executeTools(ctx, run.Root(), calls, round+1)
 		if err != nil {
@@ -223,6 +224,11 @@ func validateResponse(response provider.Response) ([]provider.ToolCall, *provide
 	case provider.StopReasonEndTurn:
 		if toolItemCount > 0 {
 			return nil, provider.NewError("invalid_provider_output", "end_turn response contains a tool call")
+		}
+		return calls, nil
+	case provider.StopReasonMaxTokens:
+		if toolItemCount > 0 {
+			return nil, provider.NewError("invalid_provider_output", "max_tokens response contains a tool call")
 		}
 		return calls, nil
 	case provider.StopReasonToolCall:

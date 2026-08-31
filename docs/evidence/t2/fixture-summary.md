@@ -4,9 +4,10 @@ Evidence class: readable local `httptest.Server` fixtures, not external compatib
 
 | Adapter | Fixture events | Aggregated output | Usage | Retry/error observations |
 |---|---:|---|---|---|
-| OpenAI Responses | 6 SSE events | 3 ordered items: function call, opaque reasoning, text; duplicate item IDs collapsed | input 11, output 7 | `rate_limit` honored `Retry-After: 1` for 3 attempts; partial stream made 1 attempt and returned `stream_protocol` |
-| Anthropic Messages | 9 SSE events | 2 ordered items: opaque thinking/signature, tool use with aggregated JSON arguments | input 5, output 4, cache-read 2, cache-creation 3 | tool-use stop mapped to `tool_call`; unsupported blocks return `stream_protocol` |
+| OpenAI Responses | 6 SSE events | 3 ordered items: function call, opaque reasoning, text; duplicate item IDs collapsed | input 11, output 7 | requests `reasoning.encrypted_content`; prior reasoning/tool output is remapped; `rate_limit` honors `Retry-After`; partial stream is not retried |
+| Anthropic Messages | 11 SSE events, including `ping` and an unknown envelope | 2 ordered items: opaque thinking/signature, tool use with aggregated JSON arguments | input 5, output 4, cache-read 2, cache-creation 3 | prior thinking/tool result is remapped; `ping` and future envelopes are ignored; unknown content blocks remain `stream_protocol` |
 
-The provider tests also exercise arbitrary response write chunks, request headers, model/tool
-mapping, cancellation, and normalized authentication/permission/request/server error mapping in
-the shared HTTP path. No API key or model content is present in this artifact.
+The provider tests also exercise provider-specific default endpoints, arbitrary response write
+chunks, request headers, model/tool mapping, provider-owned opaque filtering, `max_tokens` versus
+Agent `max_rounds`, cancellation, and normalized authentication/permission/request/server error
+mapping. No API key or model content is present in this artifact.

@@ -126,11 +126,12 @@ type Usage struct {
 type StopReason string
 
 const (
-	StopReasonEndTurn  StopReason = "end_turn"
-	StopReasonToolCall StopReason = "tool_call"
-	StopReasonMaxRound StopReason = "max_rounds"
-	StopReasonCanceled StopReason = "canceled"
-	StopReasonError    StopReason = "error"
+	StopReasonEndTurn   StopReason = "end_turn"
+	StopReasonToolCall  StopReason = "tool_call"
+	StopReasonMaxTokens StopReason = "max_tokens"
+	StopReasonMaxRound  StopReason = "max_rounds"
+	StopReasonCanceled  StopReason = "canceled"
+	StopReasonError     StopReason = "error"
 )
 
 // Message is the provider-neutral conversation representation.

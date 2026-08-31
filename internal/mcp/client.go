@@ -594,6 +594,9 @@ func (c *Client) readStdout(stdout io.ReadCloser) {
 		}
 		c.mu.Lock()
 		response := c.pending[id]
+		if response != nil {
+			delete(c.pending, id)
+		}
 		c.mu.Unlock()
 		if response == nil {
 			continue

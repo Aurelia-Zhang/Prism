@@ -109,6 +109,20 @@ func TestRunUsesOptionalStreamingProviderAndEventSink(t *testing.T) {
 	}
 }
 
+func TestRunReturnsProviderMaxTokensWithoutConfusingMaxRounds(t *testing.T) {
+	fake := &fakeProvider{responses: []provider.Response{{
+		Output:     []provider.OutputItem{{Kind: provider.OutputText, Text: "partial"}},
+		StopReason: provider.StopReasonMaxTokens,
+	}}}
+	result, err := newRunner(t, fake, tool.NewRegistry(), 1).Run(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("provider max_tokens was treated as an Agent max-round error: %v", err)
+	}
+	if result.StopReason != provider.StopReasonMaxTokens || len(result.Messages) != 1 || result.Messages[0].OutputItems[0].Text != "partial" {
+		t.Fatalf("provider stop reason was not preserved: %#v", result)
+	}
+}
+
 func TestRunFeedsSingleToolResultBack(t *testing.T) {
 	registry := tool.NewRegistry()
 	if err := registry.Register(tool.Tool{Name: "echo", Schema: json.RawMessage(`{"type":"object","required":["value"]}`), Handler: func(_ context.Context, args json.RawMessage) (string, error) { return string(args), nil }}); err != nil {
