@@ -105,6 +105,14 @@ func (r *Registry) Unregister(names ...string) int {
 	return removed
 }
 
+// Has reports whether a tool name is registered.
+func (r *Registry) Has(name string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, exists := r.tools[name]
+	return exists
+}
+
 // Definitions returns a stable, detached list for a provider request.
 func (r *Registry) Definitions() []provider.ToolDefinition {
 	r.mu.RLock()
