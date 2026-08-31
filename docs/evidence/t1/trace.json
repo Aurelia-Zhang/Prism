@@ -1,0 +1,259 @@
+{
+  "trace": {
+    "spans": [
+      {
+        "id": "t1-span-1",
+        "name": "agent.run",
+        "status": "ok",
+        "start_time": "2026-01-02T03:04:05Z",
+        "end_time": "2026-01-02T03:04:05Z",
+        "start_sequence": 1,
+        "end_sequence": 9,
+        "usage": {
+          "input_tokens": 37,
+          "output_tokens": 11,
+          "cache_read_tokens": 1,
+          "cache_write_tokens": 1
+        }
+      },
+      {
+        "id": "t1-span-2",
+        "name": "model.call",
+        "parent_span_id": "t1-span-1",
+        "status": "ok",
+        "start_time": "2026-01-02T03:04:05Z",
+        "end_time": "2026-01-02T03:04:05Z",
+        "start_sequence": 2,
+        "end_sequence": 1,
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 2,
+          "cache_read_tokens": 1,
+          "cache_write_tokens": 1
+        },
+        "attributes": {
+          "agent.round": "1"
+        }
+      },
+      {
+        "id": "t1-span-3",
+        "name": "tool.call",
+        "parent_span_id": "t1-span-1",
+        "status": "error",
+        "start_time": "2026-01-02T03:04:05Z",
+        "end_time": "2026-01-02T03:04:05Z",
+        "start_sequence": 3,
+        "end_sequence": 2,
+        "usage": {},
+        "error": {
+          "code": "tool_arguments_schema_invalid",
+          "message": "jsonschema validation failed with 'memory://tool/strict#'\n- at '/value': got number, want string"
+        },
+        "attributes": {
+          "agent.round": "1",
+          "tool.call_id": "invalid",
+          "tool.name": "strict"
+        }
+      },
+      {
+        "id": "t1-span-4",
+        "name": "model.call",
+        "parent_span_id": "t1-span-1",
+        "status": "ok",
+        "start_time": "2026-01-02T03:04:05Z",
+        "end_time": "2026-01-02T03:04:05Z",
+        "start_sequence": 4,
+        "end_sequence": 3,
+        "usage": {
+          "input_tokens": 7,
+          "output_tokens": 2
+        },
+        "attributes": {
+          "agent.round": "2"
+        }
+      },
+      {
+        "id": "t1-span-5",
+        "name": "tool.call",
+        "parent_span_id": "t1-span-1",
+        "status": "ok",
+        "start_time": "2026-01-02T03:04:05Z",
+        "end_time": "2026-01-02T03:04:05Z",
+        "start_sequence": 5,
+        "end_sequence": 4,
+        "usage": {},
+        "attributes": {
+          "agent.round": "2",
+          "tool.call_id": "corrected-call",
+          "tool.name": "strict"
+        }
+      },
+      {
+        "id": "t1-span-6",
+        "name": "model.call",
+        "parent_span_id": "t1-span-1",
+        "status": "ok",
+        "start_time": "2026-01-02T03:04:05Z",
+        "end_time": "2026-01-02T03:04:05Z",
+        "start_sequence": 6,
+        "end_sequence": 5,
+        "usage": {
+          "input_tokens": 12,
+          "output_tokens": 4
+        },
+        "attributes": {
+          "agent.round": "3"
+        }
+      },
+      {
+        "id": "t1-span-7",
+        "name": "tool.call",
+        "parent_span_id": "t1-span-1",
+        "status": "ok",
+        "start_time": "2026-01-02T03:04:05Z",
+        "end_time": "2026-01-02T03:04:05Z",
+        "start_sequence": 7,
+        "end_sequence": 7,
+        "usage": {},
+        "attributes": {
+          "agent.round": "3",
+          "tool.call_id": "alpha-call",
+          "tool.name": "alpha"
+        }
+      },
+      {
+        "id": "t1-span-8",
+        "name": "tool.call",
+        "parent_span_id": "t1-span-1",
+        "status": "ok",
+        "start_time": "2026-01-02T03:04:05Z",
+        "end_time": "2026-01-02T03:04:05Z",
+        "start_sequence": 8,
+        "end_sequence": 6,
+        "usage": {},
+        "attributes": {
+          "agent.round": "3",
+          "tool.call_id": "beta-call",
+          "tool.name": "beta"
+        }
+      },
+      {
+        "id": "t1-span-9",
+        "name": "model.call",
+        "parent_span_id": "t1-span-1",
+        "status": "ok",
+        "start_time": "2026-01-02T03:04:05Z",
+        "end_time": "2026-01-02T03:04:05Z",
+        "start_sequence": 9,
+        "end_sequence": 8,
+        "usage": {
+          "input_tokens": 8,
+          "output_tokens": 3
+        },
+        "attributes": {
+          "agent.round": "4"
+        }
+      }
+    ]
+  },
+  "messages": [
+    {
+      "role": "assistant",
+      "output_items": [
+        {
+          "kind": "tool_call",
+          "tool_call": {
+            "id": "invalid",
+            "name": "strict",
+            "arguments": {
+              "value": 9
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_results": [
+        {
+          "tool_call_id": "invalid",
+          "name": "strict",
+          "error": {
+            "code": "tool_arguments_schema_invalid",
+            "message": "jsonschema validation failed with 'memory://tool/strict#'\n- at '/value': got number, want string"
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "output_items": [
+        {
+          "kind": "tool_call",
+          "tool_call": {
+            "id": "corrected-call",
+            "name": "strict",
+            "arguments": {
+              "value": "fixed"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_results": [
+        {
+          "tool_call_id": "corrected-call",
+          "name": "strict",
+          "content": "strict result"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "output_items": [
+        {
+          "kind": "tool_call",
+          "tool_call": {
+            "id": "alpha-call",
+            "name": "alpha",
+            "arguments": {}
+          }
+        },
+        {
+          "kind": "tool_call",
+          "tool_call": {
+            "id": "beta-call",
+            "name": "beta",
+            "arguments": {}
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_results": [
+        {
+          "tool_call_id": "alpha-call",
+          "name": "alpha",
+          "content": "alpha result"
+        },
+        {
+          "tool_call_id": "beta-call",
+          "name": "beta",
+          "content": "beta result"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "output_items": [
+        {
+          "kind": "text",
+          "text": "complete"
+        }
+      ]
+    }
+  ]
+}
