@@ -6,7 +6,7 @@ E1 may be developed in parallel.
 
 | ID | Status | MR boundary | Reproducible acceptance evidence |
 |---|---|---|---|
-| B0 | partial | Repository contract, `prism-mr` skill, Roadmap, resume evidence ledger, PR template, and truth-only README | Skill validation, repository build/test, reviewed Git diff, then Commit/PR links |
+| B0 | verified | Repository contract, `prism-mr` skill, Roadmap, resume evidence ledger, PR template, and truth-only README | Skill validation, repository build/test, reviewed Git diff, and [PR #1](https://github.com/Aurelia-Zhang/Prism/pull/1) |
 | T1 | planned | In-memory Trace model, Provider-neutral Agent Loop, JSON Schema tool registry, validation feedback, ordered parallel tool execution, cancellation and loop limits | Unit/integration tests with a fake Provider plus a real in-memory Trace from the tested runtime path |
 | T2 | planned | OpenAI Responses and Anthropic Messages adapters, streaming aggregation, unified errors and bounded retry, MCP stdio discovery/execution | Adapter fixtures plus separately recorded real OpenAI, Anthropic, and MCP smoke tests; unavailable live tests remain `partial` |
 | C1 | planned | Stable context prefix, structured compression, large-output persistence/retrieval, SQLite session/project/long-term memory, BM25 and vector-cosine hybrid recall | Long-context and retrieval scenarios, persisted artifacts, Token/context-size comparison, known scale limits |
