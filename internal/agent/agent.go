@@ -21,6 +21,18 @@ type Runner struct {
 	maxRounds int
 }
 
+type runOptions struct {
+	eventSink provider.EventSink
+}
+
+// RunOption configures one Agent Loop run without breaking the T1 call shape.
+type RunOption func(*runOptions)
+
+// WithEventSink receives normalized events when the Provider supports streaming.
+func WithEventSink(sink provider.EventSink) RunOption {
+	return func(options *runOptions) { options.eventSink = sink }
+}
+
 // NewRunner creates a runner. maxRounds is the maximum number of Provider calls.
 func NewRunner(provider provider.Provider, tools *tool.Registry, recorder *trace.Recorder, maxRounds int) *Runner {
 	return &Runner{provider: provider, tools: tools, recorder: recorder, maxRounds: maxRounds}
@@ -28,18 +40,25 @@ func NewRunner(provider provider.Provider, tools *tool.Registry, recorder *trace
 
 // Result contains the conversation and the complete trace for a run.
 type Result struct {
-	Messages []provider.Message `json:"messages"`
-	Trace    trace.Snapshot     `json:"trace"`
+	Messages   []provider.Message  `json:"messages"`
+	StopReason provider.StopReason `json:"stop_reason,omitempty"`
+	Trace      trace.Snapshot      `json:"trace"`
 }
 
 // Run executes the loop until normal completion, cancellation, a fatal provider
 // error, or maxRounds. maxRounds counts Provider calls, not tool rounds.
-func (r *Runner) Run(ctx context.Context, messages []provider.Message) (result Result, runErr error) {
+func (r *Runner) Run(ctx context.Context, messages []provider.Message, options ...RunOption) (result Result, runErr error) {
 	if r == nil || r.recorder == nil {
 		return result, provider.NewError("invalid_runner", "provider, tools, and recorder are required")
 	}
 	run := r.recorder.StartRun()
 	conversation := cloneMessages(messages)
+	runOptions := runOptions{}
+	for _, option := range options {
+		if option != nil {
+			option(&runOptions)
+		}
+	}
 	var totalUsage provider.Usage
 	defer func() {
 		if runErr == nil {
@@ -70,7 +89,7 @@ func (r *Runner) Run(ctx context.Context, messages []provider.Message) (result R
 			modelSpan.End(trace.StatusError, structured, provider.Usage{})
 			return result, structured
 		}
-		response, err := r.provider.Complete(ctx, cloneMessages(conversation), definitions)
+		response, err := r.complete(ctx, cloneMessages(conversation), definitions, modelSpan, runOptions.eventSink)
 		totalUsage = addUsage(totalUsage, response.Usage)
 		if cancellation := ctx.Err(); cancellation != nil {
 			structured := provider.ErrorFrom(cancellation, "context_canceled")
@@ -94,7 +113,7 @@ func (r *Runner) Run(ctx context.Context, messages []provider.Message) (result R
 		})
 
 		if len(calls) == 0 {
-			return Result{Messages: conversation}, nil
+			return Result{Messages: conversation, StopReason: response.StopReason}, nil
 		}
 		results, err := r.executeTools(ctx, run.Root(), calls, round+1)
 		if err != nil {
@@ -159,6 +178,32 @@ func (r *Runner) executeTools(ctx context.Context, parent *trace.Span, calls []p
 	return results, nil
 }
 
+func (r *Runner) complete(ctx context.Context, messages []provider.Message, definitions []provider.ToolDefinition, modelSpan *trace.Span, sink provider.EventSink) (provider.Response, error) {
+	streaming, ok := r.provider.(provider.StreamingProvider)
+	if !ok {
+		return r.provider.Complete(ctx, messages, definitions)
+	}
+	traceSink := func(event provider.StreamEvent) error {
+		if event.Kind == provider.EventAttempt {
+			modelSpan.SetAttribute("provider", event.Attempt.Provider)
+			modelSpan.SetAttribute("model", event.Attempt.Model)
+			modelSpan.SetAttribute("attempt", strconv.Itoa(event.Attempt.Number))
+			if event.Attempt.Error != nil {
+				modelSpan.SetAttribute("error.code", event.Attempt.Error.Code)
+				modelSpan.SetAttribute("retryable", strconv.FormatBool(event.Attempt.Error.Retryable))
+			} else {
+				modelSpan.DeleteAttribute("error.code")
+				modelSpan.DeleteAttribute("retryable")
+			}
+		}
+		if sink != nil {
+			return sink(event)
+		}
+		return nil
+	}
+	return streaming.Stream(ctx, messages, definitions, traceSink)
+}
+
 func validateResponse(response provider.Response) ([]provider.ToolCall, *provider.Error) {
 	calls := make([]provider.ToolCall, 0)
 	toolItemCount := 0
@@ -179,6 +224,11 @@ func validateResponse(response provider.Response) ([]provider.ToolCall, *provide
 	case provider.StopReasonEndTurn:
 		if toolItemCount > 0 {
 			return nil, provider.NewError("invalid_provider_output", "end_turn response contains a tool call")
+		}
+		return calls, nil
+	case provider.StopReasonMaxTokens:
+		if toolItemCount > 0 {
+			return nil, provider.NewError("invalid_provider_output", "max_tokens response contains a tool call")
 		}
 		return calls, nil
 	case provider.StopReasonToolCall:
@@ -225,6 +275,11 @@ func cloneOutputItems(items []provider.OutputItem) []provider.OutputItem {
 			call := *item.ToolCall
 			call.Arguments = append(json.RawMessage(nil), call.Arguments...)
 			cloned[i].ToolCall = &call
+		}
+		if item.Opaque != nil {
+			opaque := *item.Opaque
+			opaque.Raw = append(json.RawMessage(nil), opaque.Raw...)
+			cloned[i].Opaque = &opaque
 		}
 	}
 	return cloned

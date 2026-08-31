@@ -80,6 +80,31 @@ func (r *Registry) Register(tool Tool) error {
 	return nil
 }
 
+// Unregister removes tools by name and returns the number of tools removed.
+// Names that are not registered are ignored.
+func (r *Registry) Unregister(names ...string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	removed := 0
+	for _, name := range names {
+		if _, exists := r.tools[name]; exists {
+			delete(r.tools, name)
+			removed++
+		}
+	}
+	if removed == 0 {
+		return 0
+	}
+	order := r.order[:0]
+	for _, name := range r.order {
+		if _, exists := r.tools[name]; exists {
+			order = append(order, name)
+		}
+	}
+	r.order = order
+	return removed
+}
+
 // Definitions returns a stable, detached list for a provider request.
 func (r *Registry) Definitions() []provider.ToolDefinition {
 	r.mu.RLock()

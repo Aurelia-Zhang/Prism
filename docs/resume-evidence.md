@@ -3,15 +3,16 @@
 This ledger is the source of truth for resume claims. States follow `AGENTS.md`. The lost first
 version and repositories under `/Users/aurelia/career/refer-projects` are design references only.
 
-Current repository fact: the repository contains a minimal `version/help` CLI and the verified T1
-runtime described below. External Provider and MCP compatibility remain unverified.
+Current repository fact: the repository contains a minimal `version/help` CLI, the verified T1
+runtime, T2 local protocol fixtures, and an opt-in live smoke path. External Provider and third-party
+MCP compatibility are not verified in the default environment.
 
 | Claim | Roadmap | State | Code | Tests | Trace / metrics | Commit / PR | Known limits |
 |---|---|---|---|---|---|---|---|
 | Provider-neutral Agent Loop and unified message/tool/usage/stop contracts | T1 | verified | `internal/provider`, `internal/agent` | `internal/agent/TestRunStopsNormallyWithoutTools`, `TestRunFeedsSingleToolResultBack`, `TestRunProviderFatalError`, `TestRunCancellationAndMaxRounds` | `internal/agent/TestTraceArtifact`; [`docs/evidence/t1/trace.json`](evidence/t1/trace.json) | [`1cf4530`](https://github.com/Aurelia-Zhang/Prism/commit/1cf4530), [PR #2](https://github.com/Aurelia-Zhang/Prism/pull/2) | Fake Provider verifies internal runtime behavior only; no external adapter |
 | JSON Schema validation feeds tool errors back to the model; same-round tools execute concurrently and return in call order | T1 | verified | `internal/tool`, `internal/agent` | `internal/tool` registry tests; `internal/agent/TestRunExecutesSameRoundToolsConcurrentlyAndKeepsOrder`, `TestRunFeedsValidationFailureAndHandlerFailureBack` | [`docs/evidence/t1/trace.json`](evidence/t1/trace.json) | [`1cf4530`](https://github.com/Aurelia-Zhang/Prism/commit/1cf4530), [PR #2](https://github.com/Aurelia-Zhang/Prism/pull/2) | In-memory registry; no MCP or built-in tools |
-| OpenAI Responses and Anthropic Messages streaming, errors, and retry | T2 | planned | — | — | — | — | No adapters; no live compatibility evidence |
-| MCP Client discovers and executes external stdio tools | T2 | planned | — | — | — | — | No MCP implementation or smoke test |
+| OpenAI Responses and Anthropic Messages streaming, errors, and retry | T2 | partial | `internal/provider`, `internal/agent` | `internal/provider/TestOpenAIResponsesAggregatesOrderedItemsAndContinuation`, `TestAnthropicMessagesAggregatesThinkingToolAndUsage`, `TestProviderDefaultEndpoints`, `TestAnthropicUsesDefaultEndpoint`, `TestAnthropicMaxTokensHasProviderStopReason`, `TestRetryAfterAndPartialStreamDoNotRetry`, `TestStreamingCancellationStopsWithoutRetry`; `internal/agent/TestRunUsesOptionalStreamingProviderAndEventSink`, `TestRunReturnsProviderMaxTokensWithoutConfusingMaxRounds` | [`docs/evidence/t2/fixture-summary.md`](evidence/t2/fixture-summary.md) | [PR #3](https://github.com/Aurelia-Zhang/Prism/pull/3) | httptest fixtures verify the implemented protocol subset; live OpenAI and Anthropic smoke are opt-in and not recorded |
+| MCP Client discovers and executes external stdio tools | T2 | partial | `internal/mcp`, `internal/tool` | `internal/mcp/TestClientLifecycleListAndCall`, `TestClientProtocolError`, `TestClientExitRemovesOwnToolsAndBoundsStderr`, `TestClientCallCancellation`, `TestMCPScenarioArtifact` | [`docs/evidence/t2/mcp-subprocess-transcript.md`](evidence/t2/mcp-subprocess-transcript.md) | [PR #3](https://github.com/Aurelia-Zhang/Prism/pull/3) | local child-process fixture is not third-party compatibility evidence; external smoke is opt-in and not recorded |
 | Stable prompt/tool prefix and structured context compression preserve unfinished work and key file references | C1 | planned | — | — | — | — | No context assembler or Token comparison |
 | Session/project/long-term SQLite memory uses BM25 and vector-cosine hybrid recall | C1 | planned | — | — | — | — | No schema, retrieval code, or quality measurement |
 | Large tool outputs are summarized for the model, persisted, and retrievable by ID/range | C1 | planned | — | — | — | — | No output store or context-growth measurement |
