@@ -4,9 +4,14 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 
+	contextx "github.com/Aurelia-Zhang/Prism/internal/context"
+	"github.com/Aurelia-Zhang/Prism/internal/memory"
+	"github.com/Aurelia-Zhang/Prism/internal/output"
 	"github.com/Aurelia-Zhang/Prism/internal/provider"
 	"github.com/Aurelia-Zhang/Prism/internal/tool"
 	"github.com/Aurelia-Zhang/Prism/internal/trace"
@@ -23,6 +28,22 @@ type Runner struct {
 
 type runOptions struct {
 	eventSink provider.EventSink
+	runtime   RuntimeConfig
+}
+
+// RuntimeConfig enables the optional C1 context and persistence path. A zero
+// value preserves the T1/T2 Agent Loop behavior.
+type RuntimeConfig struct {
+	Compactor            *contextx.Compactor
+	Memory               *memory.Store
+	MemoryScopes         []memory.ScopeRef
+	MemoryMode           memory.SearchMode
+	MemoryTopK           int
+	SessionID            string
+	ProjectID            string
+	LongTermID           string
+	OutputStore          *output.Store
+	LargeOutputThreshold int
 }
 
 // RunOption configures one Agent Loop run without breaking the T1 call shape.
@@ -31,6 +52,12 @@ type RunOption func(*runOptions)
 // WithEventSink receives normalized events when the Provider supports streaming.
 func WithEventSink(sink provider.EventSink) RunOption {
 	return func(options *runOptions) { options.eventSink = sink }
+}
+
+// WithRuntime enables optional context compaction, memory recall, and output
+// persistence for one run.
+func WithRuntime(config RuntimeConfig) RunOption {
+	return func(options *runOptions) { options.runtime = config }
 }
 
 // NewRunner creates a runner. maxRounds is the maximum number of Provider calls.
@@ -59,6 +86,7 @@ func (r *Runner) Run(ctx context.Context, messages []provider.Message, options .
 			option(&runOptions)
 		}
 	}
+	runtime := runOptions.runtime
 	var totalUsage provider.Usage
 	defer func() {
 		if runErr == nil {
@@ -78,9 +106,23 @@ func (r *Runner) Run(ctx context.Context, messages []provider.Message, options .
 	if r.maxRounds <= 0 {
 		return result, provider.NewError("invalid_max_rounds", "max rounds must be greater than zero")
 	}
+	if runtime.OutputStore != nil && !r.tools.Has("fetch_output") {
+		if err := r.tools.Register(runtime.OutputStore.Tool()); err != nil {
+			return result, provider.ErrorFrom(err, "output_tool_registration_error")
+		}
+	}
 	definitions := r.tools.Definitions()
+	var err error
+	conversation, err = r.recallMemory(ctx, run.Root(), conversation, runtime)
+	if err != nil {
+		return result, err
+	}
 
 	for round := 0; round < r.maxRounds; round++ {
+		conversation, err = r.compactContext(ctx, run.Root(), conversation, runtime)
+		if err != nil {
+			return result, err
+		}
 		modelSpan := run.Root().StartChildWithAttributes("model.call", trace.Attributes{
 			"agent.round": strconv.Itoa(round + 1),
 		})
@@ -115,7 +157,7 @@ func (r *Runner) Run(ctx context.Context, messages []provider.Message, options .
 		if len(calls) == 0 {
 			return Result{Messages: conversation, StopReason: response.StopReason}, nil
 		}
-		results, err := r.executeTools(ctx, run.Root(), calls, round+1)
+		results, err := r.executeTools(ctx, run.Root(), calls, round+1, runtime)
 		if err != nil {
 			return result, provider.ErrorFrom(err, "tool_execution_error")
 		}
@@ -130,7 +172,7 @@ func (r *Runner) Run(ctx context.Context, messages []provider.Message, options .
 	return result, provider.NewError("max_rounds_exceeded", "maximum provider call count reached")
 }
 
-func (r *Runner) executeTools(ctx context.Context, parent *trace.Span, calls []provider.ToolCall, round int) ([]provider.ToolResult, error) {
+func (r *Runner) executeTools(ctx context.Context, parent *trace.Span, calls []provider.ToolCall, round int, runtime RuntimeConfig) ([]provider.ToolResult, error) {
 	childContext, cancel := context.WithCancel(ctx)
 	defer cancel()
 	spans := make([]*trace.Span, len(calls))
@@ -161,6 +203,26 @@ func (r *Runner) executeTools(ctx context.Context, parent *trace.Span, calls []p
 				cancel()
 				return
 			}
+			if runtime.OutputStore != nil && runtime.LargeOutputThreshold > 0 && len(result.Content) > runtime.LargeOutputThreshold {
+				originalSize := len(result.Content)
+				persistSpan := spans[index].StartChildWithAttributes("output.persist", trace.Attributes{"output.original_bytes": strconv.Itoa(originalSize)})
+				var record output.Record
+				result, record, err = persistLargeOutput(ctx, runtime.OutputStore, result)
+				if err != nil {
+					persistSpan.End(trace.StatusError, provider.ErrorFrom(err, "output_persist_error"), provider.Usage{})
+					spans[index].End(trace.StatusError, provider.ErrorFrom(err, "output_persist_error"), provider.Usage{})
+					errorMu.Lock()
+					if executionErr == nil {
+						executionErr = err
+					}
+					errorMu.Unlock()
+					cancel()
+					return
+				}
+				persistSpan.SetAttribute("output.id", record.ID)
+				persistSpan.SetAttribute("output.persisted_bytes", strconv.Itoa(len(result.Content)))
+				persistSpan.End(trace.StatusOK, nil, provider.Usage{})
+			}
 			results[index] = result
 			if result.Error != nil {
 				spans[index].End(trace.StatusError, result.Error, provider.Usage{})
@@ -176,6 +238,118 @@ func (r *Runner) executeTools(ctx context.Context, parent *trace.Span, calls []p
 		return nil, executionErr
 	}
 	return results, nil
+}
+
+func (r *Runner) recallMemory(ctx context.Context, parent *trace.Span, messages []provider.Message, runtime RuntimeConfig) ([]provider.Message, error) {
+	if runtime.Memory == nil {
+		return messages, nil
+	}
+	query := lastUserText(messages)
+	if strings.TrimSpace(query) == "" {
+		return messages, nil
+	}
+	scopes := runtime.MemoryScopes
+	if len(scopes) == 0 {
+		if runtime.SessionID != "" {
+			scopes = append(scopes, memory.ScopeRef{Scope: memory.ScopeSession, ScopeID: runtime.SessionID})
+		}
+		if runtime.ProjectID != "" {
+			scopes = append(scopes, memory.ScopeRef{Scope: memory.ScopeProject, ScopeID: runtime.ProjectID})
+		}
+		longTermID := runtime.LongTermID
+		if longTermID == "" {
+			longTermID = "global"
+		}
+		scopes = append(scopes, memory.ScopeRef{Scope: memory.ScopeLongTerm, ScopeID: longTermID})
+	}
+	topK := runtime.MemoryTopK
+	if topK <= 0 {
+		topK = 3
+	}
+	mode := runtime.MemoryMode
+	if mode == "" {
+		mode = memory.SearchHybrid
+	}
+	span := parent.StartChildWithAttributes("memory.recall", trace.Attributes{"memory.query": query, "memory.top_k": strconv.Itoa(topK)})
+	var recalled []string
+	for _, scope := range scopes {
+		results, err := runtime.Memory.Recall(ctx, scope, query, topK, mode)
+		if err != nil {
+			span.End(trace.StatusError, provider.ErrorFrom(err, "memory_recall_error"), provider.Usage{})
+			return nil, provider.ErrorFrom(err, "memory_recall_error")
+		}
+		span.SetAttribute("memory."+string(scope.Scope)+".count", strconv.Itoa(len(results)))
+		for _, result := range results {
+			recalled = append(recalled, fmtMemory(result))
+		}
+	}
+	span.End(trace.StatusOK, nil, provider.Usage{})
+	if len(recalled) == 0 {
+		return messages, nil
+	}
+	return prependSystem(messages, "memory_recall:\n"+strings.Join(recalled, "\n")), nil
+}
+
+func (r *Runner) compactContext(ctx context.Context, parent *trace.Span, messages []provider.Message, runtime RuntimeConfig) ([]provider.Message, error) {
+	if runtime.Compactor == nil {
+		return messages, nil
+	}
+	compacted, report, err := runtime.Compactor.Compact(ctx, messages)
+	if err != nil {
+		return nil, provider.ErrorFrom(err, "context_compact_error")
+	}
+	if !report.Compacted {
+		return compacted, nil
+	}
+	span := parent.StartChildWithAttributes("context.compact", trace.Attributes{
+		"context.before_tokens":    strconv.Itoa(report.BeforeTokens),
+		"context.after_tokens":     strconv.Itoa(report.AfterTokens),
+		"context.before_messages":  strconv.Itoa(report.BeforeMessages),
+		"context.after_messages":   strconv.Itoa(report.AfterMessages),
+		"context.dropped_messages": strconv.Itoa(report.DroppedMessages),
+	})
+	span.End(trace.StatusOK, nil, provider.Usage{})
+	return compacted, nil
+}
+
+func lastUserText(messages []provider.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == provider.RoleUser && messages[i].Text != "" {
+			return messages[i].Text
+		}
+	}
+	return ""
+}
+
+func prependSystem(messages []provider.Message, text string) []provider.Message {
+	result := make([]provider.Message, 0, len(messages)+1)
+	result = append(result, provider.Message{Role: provider.RoleSystem, Text: text})
+	return append(result, messages...)
+}
+
+func fmtMemory(result memory.Result) string {
+	return fmt.Sprintf("[%s/%s score=%.4f] %s", result.Scope, result.ScopeID, result.Score, result.Content)
+}
+
+func persistLargeOutput(ctx context.Context, store *output.Store, result provider.ToolResult) (provider.ToolResult, output.Record, error) {
+	record, err := store.Persist(ctx, result.Content)
+	if err != nil {
+		return provider.ToolResult{}, output.Record{}, err
+	}
+	excerpt := result.Content
+	if len(excerpt) > 240 {
+		excerpt = excerpt[:240]
+	}
+	response, err := json.Marshal(struct {
+		OutputID      string `json:"output_id"`
+		OriginalBytes int    `json:"original_bytes"`
+		Summary       string `json:"summary"`
+	}{record.ID, len(result.Content), excerpt})
+	if err != nil {
+		return provider.ToolResult{}, output.Record{}, err
+	}
+	result.Content = string(response)
+	return result, record, nil
 }
 
 func (r *Runner) complete(ctx context.Context, messages []provider.Message, definitions []provider.ToolDefinition, modelSpan *trace.Span, sink provider.EventSink) (provider.Response, error) {

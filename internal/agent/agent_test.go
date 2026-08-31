@@ -8,10 +8,14 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	contextx "github.com/Aurelia-Zhang/Prism/internal/context"
+	"github.com/Aurelia-Zhang/Prism/internal/memory"
+	"github.com/Aurelia-Zhang/Prism/internal/output"
 	"github.com/Aurelia-Zhang/Prism/internal/provider"
 	"github.com/Aurelia-Zhang/Prism/internal/tool"
 	"github.com/Aurelia-Zhang/Prism/internal/trace"
@@ -346,6 +350,85 @@ func TestRunDoesNotCallProviderWhenAlreadyCanceledAndChecksAfterCall(t *testing.
 	}
 	if result.Trace.Spans[1].Status != trace.StatusError || result.Trace.Spans[0].Status != trace.StatusError {
 		t.Fatalf("post-canceled spans were not ended as errors: %#v", result.Trace)
+	}
+}
+
+type agentEmbedder struct{}
+
+func (agentEmbedder) Embed(context.Context, string) ([]float32, error) { return []float32{1, 0}, nil }
+
+func TestRunOptionalC1RuntimeRecallsCompactsAndPersistsOutput(t *testing.T) {
+	dir := t.TempDir()
+	store, err := memory.Open(filepath.Join(dir, "prism.db"), agentEmbedder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if _, err := store.Write(context.Background(), memory.ScopeSession, "s1", "remember the architecture decision", nil); err != nil {
+		t.Fatal(err)
+	}
+	outputs, err := output.NewStore(store.DB(), filepath.Join(dir, "outputs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	large := strings.Repeat("x", 80)
+	registry := tool.NewRegistry()
+	if err := registry.Register(tool.Tool{Name: "large", Schema: json.RawMessage(`{"type":"object"}`), Handler: func(context.Context, json.RawMessage) (string, error) {
+		return large, nil
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeProvider{responses: []provider.Response{
+		callResponse(provider.ToolCall{ID: "large-1", Name: "large", Arguments: json.RawMessage(`{}`)}),
+		textResponse("finished"),
+	}}
+	result, err := NewRunner(fake, registry, trace.NewRecorder(trace.Options{}), 2).Run(context.Background(), []provider.Message{
+		{Role: provider.RoleUser, Text: "old context"},
+		{Role: provider.RoleAssistant, Text: strings.Repeat("history ", 30)},
+		{Role: provider.RoleUser, Text: "architecture"},
+	}, WithRuntime(RuntimeConfig{
+		Compactor:            contextx.NewCompactor(contextx.Config{BudgetTokens: 30, RecentRounds: 1, Summarizer: contextx.DeterministicSummarizer{}}),
+		Memory:               store,
+		MemoryScopes:         []memory.ScopeRef{{Scope: memory.ScopeSession, ScopeID: "s1"}},
+		MemoryMode:           memory.SearchBM25,
+		MemoryTopK:           1,
+		OutputStore:          outputs,
+		LargeOutputThreshold: 20,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondCall := fake.callMessages(1)
+	encoded, _ := json.Marshal(secondCall)
+	if !strings.Contains(string(encoded), "context_summary") || !strings.Contains(string(encoded), "memory_recall") {
+		t.Fatalf("second provider call was not compacted/recalled: %s", encoded)
+	}
+	var persisted struct {
+		OutputID      string `json:"output_id"`
+		OriginalBytes int    `json:"original_bytes"`
+	}
+	toolResultMessages := fake.callMessages(1)
+	var persistedContent string
+	for _, message := range toolResultMessages {
+		if len(message.ToolResults) > 0 {
+			persistedContent = message.ToolResults[0].Content
+		}
+	}
+	if err := json.Unmarshal([]byte(persistedContent), &persisted); err != nil {
+		t.Fatalf("large output was not replaced by metadata: %v", err)
+	}
+	if persisted.OutputID == "" || persisted.OriginalBytes != len(large) {
+		t.Fatalf("unexpected persisted metadata: %#v", persisted)
+	}
+	t.Logf("output evidence: original_bytes=%d rehydrated_bytes=%d", persisted.OriginalBytes, len(persistedContent))
+	seen := map[string]bool{}
+	for _, span := range result.Trace.Spans {
+		seen[span.Name] = true
+	}
+	for _, name := range []string{"memory.recall", "context.compact", "output.persist"} {
+		if !seen[name] {
+			t.Fatalf("trace missing %s: %#v", name, result.Trace)
+		}
 	}
 }
 
