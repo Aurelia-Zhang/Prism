@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -42,5 +43,11 @@ func TestPersistFetchAndHash(t *testing.T) {
 	toolResult, err := outputs.Tool().Handler(context.Background(), json.RawMessage(`{"id":"`+record.ID+`","offset":2,"limit":4}`))
 	if err != nil || !strings.Contains(toolResult, `"content":"2345"`) {
 		t.Fatalf("fetch_output tool failed: result=%q err=%v", toolResult, err)
+	}
+	if err := os.WriteFile(record.Path, []byte("tampered"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := outputs.Fetch(context.Background(), record.ID, 0, 0); err == nil || !strings.Contains(err.Error(), "integrity check failed") {
+		t.Fatalf("tampered output was accepted: %v", err)
 	}
 }

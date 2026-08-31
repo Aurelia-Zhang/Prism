@@ -94,6 +94,11 @@ func (s *Store) Fetch(ctx context.Context, id string, offset, limit int64) ([]by
 	if err != nil {
 		return nil, Record{}, err
 	}
+	digest := sha256.Sum256(content)
+	actualHash := hex.EncodeToString(digest[:])
+	if actualHash != record.Hash {
+		return nil, Record{}, fmt.Errorf("output %q integrity check failed: stored hash %s, actual hash %s", id, record.Hash, actualHash)
+	}
 	if int64(len(content)) <= offset {
 		return []byte{}, record, nil
 	}

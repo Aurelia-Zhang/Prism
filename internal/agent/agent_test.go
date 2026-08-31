@@ -371,7 +371,7 @@ func TestRunOptionalC1RuntimeRecallsCompactsAndPersistsOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	large := strings.Repeat("x", 80)
+	large := strings.Repeat("x", 4096)
 	registry := tool.NewRegistry()
 	if err := registry.Register(tool.Tool{Name: "large", Schema: json.RawMessage(`{"type":"object"}`), Handler: func(context.Context, json.RawMessage) (string, error) {
 		return large, nil

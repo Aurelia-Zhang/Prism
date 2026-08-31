@@ -24,14 +24,15 @@ DeepSeek tokenizer count.
 
 ## Large Output
 
-`internal/agent/TestRunOptionalC1RuntimeRecallsCompactsAndPersistsOutput` returns 80
+`internal/agent/TestRunOptionalC1RuntimeRecallsCompactsAndPersistsOutput` returns 4096
 `x` bytes from a tool. The complete output is written under `t.TempDir()` and only this
-provider-facing JSON metadata summary is fed into the next call:
+provider-facing JSON metadata summary is fed into the next call. The test asserts that
+the rehydrated bytes are smaller than the original output:
 
 | Measure | Bytes |
 |---|---:|
-| Original tool output | 80 |
-| Rehydrated metadata summary | 165 |
+| Original tool output | 4096 |
+| Rehydrated metadata summary | 327 |
 
 `internal/output/TestPersistFetchAndHash` validates the SHA-256 metadata and a byte range
 fetch. The `fetch_output` tool also returns the requested range with its original size.
@@ -40,9 +41,10 @@ fetch. The `fetch_output` tool also returns the requested range with its origina
 
 The artificial relevance set contains one query, `database`, with two relevant entries
 (`database indexing` and `sqlite database`) and one non-relevant entry (`garden notes`).
-At `k=1`, all observed top results are relevant:
+At `k=1`, all observed top results are relevant. Since this is one query, the metric is
+reported as Hit@1 (equivalently Precision@1 for this one-result cutoff), not Recall@1:
 
-| Mode | Top-1 result | Relevant | Recall@1 |
+| Mode | Top-1 result | Relevant | Hit@1 |
 |---|---|---|---:|
 | BM25 | database indexing | yes | 1.0 (1/1) |
 | Vector cosine | sqlite database | yes | 1.0 (1/1) |
