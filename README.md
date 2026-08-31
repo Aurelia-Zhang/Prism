@@ -7,12 +7,15 @@ Prism is a trace-first Agent Harness being rebuilt in Go for an autumn-recruitin
 The repository currently contains:
 
 - a minimal CLI with `help` and `version` behavior;
+- a Provider-neutral internal Agent Loop with cancellation and round limits;
+- a JSON Schema Tool Registry with same-round parallel execution and ordered result feedback;
+- an in-memory Trace Recorder for `agent.run`, `model.call`, and `tool.call` spans;
 - the B / T / C / O / E delivery Roadmap;
 - collaboration, MR, and resume-evidence contracts.
 
-Trace recording, the Agent Loop, Provider adapters, tool execution, MCP, memory, Multi-Agent
-orchestration, OpenTelemetry, replay, and evaluation are planned work. See [ROADMAP.md](ROADMAP.md)
-and [docs/resume-evidence.md](docs/resume-evidence.md) for their evidence state.
+Real OpenAI and Anthropic Provider adapters, MCP, memory, Multi-Agent orchestration,
+OpenTelemetry, replay, and evaluation are not implemented. See [ROADMAP.md](ROADMAP.md) and
+[docs/resume-evidence.md](docs/resume-evidence.md) for their evidence state.
 
 ## Run the current CLI
 

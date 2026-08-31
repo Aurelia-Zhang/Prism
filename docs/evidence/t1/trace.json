@@ -1,0 +1,177 @@
+{
+  "trace": {
+    "spans": [
+      {
+        "id": "t1-span-1",
+        "name": "agent.run",
+        "status": "ok",
+        "start_time": "2026-01-02T03:04:05Z",
+        "end_time": "2026-01-02T03:04:05Z",
+        "start_sequence": 1,
+        "end_sequence": 7,
+        "usage": {
+          "input_tokens": 30,
+          "output_tokens": 9,
+          "cache_read_tokens": 1,
+          "cache_write_tokens": 1
+        }
+      },
+      {
+        "id": "t1-span-2",
+        "name": "model.call",
+        "parent_span_id": "t1-span-1",
+        "status": "ok",
+        "start_time": "2026-01-02T03:04:05Z",
+        "end_time": "2026-01-02T03:04:05Z",
+        "start_sequence": 2,
+        "end_sequence": 1,
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 2,
+          "cache_read_tokens": 1,
+          "cache_write_tokens": 1
+        }
+      },
+      {
+        "id": "t1-span-3",
+        "name": "tool.call",
+        "parent_span_id": "t1-span-2",
+        "status": "error",
+        "start_time": "2026-01-02T03:04:05Z",
+        "end_time": "2026-01-02T03:04:05Z",
+        "start_sequence": 3,
+        "end_sequence": 2,
+        "usage": {},
+        "error": {
+          "code": "tool_arguments_schema_invalid",
+          "message": "jsonschema validation failed with 'memory://tool/strict#'\n- at '/value': got number, want string"
+        }
+      },
+      {
+        "id": "t1-span-4",
+        "name": "model.call",
+        "parent_span_id": "t1-span-1",
+        "status": "ok",
+        "start_time": "2026-01-02T03:04:05Z",
+        "end_time": "2026-01-02T03:04:05Z",
+        "start_sequence": 4,
+        "end_sequence": 3,
+        "usage": {
+          "input_tokens": 12,
+          "output_tokens": 4
+        }
+      },
+      {
+        "id": "t1-span-5",
+        "name": "tool.call",
+        "parent_span_id": "t1-span-4",
+        "status": "ok",
+        "start_time": "2026-01-02T03:04:05Z",
+        "end_time": "2026-01-02T03:04:05Z",
+        "start_sequence": 5,
+        "end_sequence": 5,
+        "usage": {}
+      },
+      {
+        "id": "t1-span-6",
+        "name": "tool.call",
+        "parent_span_id": "t1-span-4",
+        "status": "ok",
+        "start_time": "2026-01-02T03:04:05Z",
+        "end_time": "2026-01-02T03:04:05Z",
+        "start_sequence": 6,
+        "end_sequence": 4,
+        "usage": {}
+      },
+      {
+        "id": "t1-span-7",
+        "name": "model.call",
+        "parent_span_id": "t1-span-1",
+        "status": "ok",
+        "start_time": "2026-01-02T03:04:05Z",
+        "end_time": "2026-01-02T03:04:05Z",
+        "start_sequence": 7,
+        "end_sequence": 6,
+        "usage": {
+          "input_tokens": 8,
+          "output_tokens": 3
+        }
+      }
+    ]
+  },
+  "messages": [
+    {
+      "role": "assistant",
+      "output_items": [
+        {
+          "kind": "tool_call",
+          "tool_call": {
+            "id": "invalid",
+            "name": "strict",
+            "arguments": {
+              "value": 9
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_results": [
+        {
+          "tool_call_id": "invalid",
+          "name": "strict",
+          "error": {
+            "code": "tool_arguments_schema_invalid",
+            "message": "jsonschema validation failed with 'memory://tool/strict#'\n- at '/value': got number, want string"
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "output_items": [
+        {
+          "kind": "tool_call",
+          "tool_call": {
+            "id": "alpha-call",
+            "name": "alpha",
+            "arguments": {}
+          }
+        },
+        {
+          "kind": "tool_call",
+          "tool_call": {
+            "id": "beta-call",
+            "name": "beta",
+            "arguments": {}
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_results": [
+        {
+          "tool_call_id": "alpha-call",
+          "name": "alpha",
+          "content": "alpha result"
+        },
+        {
+          "tool_call_id": "beta-call",
+          "name": "beta",
+          "content": "beta result"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "output_items": [
+        {
+          "kind": "text",
+          "text": "complete"
+        }
+      ]
+    }
+  ]
+}
