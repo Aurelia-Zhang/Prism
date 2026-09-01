@@ -44,6 +44,13 @@ type RuntimeConfig struct {
 	LongTermID           string
 	OutputStore          *output.Store
 	LargeOutputThreshold int
+	TraceStore           TraceStore
+}
+
+// TraceStore is the persistence seam used after a run has closed its root span.
+// observability.Store implements it without coupling the Agent Loop to SQLite.
+type TraceStore interface {
+	Save(context.Context, trace.Snapshot) error
 }
 
 // RunOption configures one Agent Loop run without breaking the T1 call shape.
@@ -98,6 +105,11 @@ func (r *Runner) Run(ctx context.Context, messages []provider.Message, options .
 			result.Messages = cloneMessages(conversation)
 		}
 		result.Trace = run.Snapshot()
+		if runtime.TraceStore != nil {
+			if err := runtime.TraceStore.Save(context.Background(), result.Trace); err != nil && runErr == nil {
+				runErr = provider.ErrorFrom(err, "trace_persist_error")
+			}
+		}
 	}()
 
 	if r.provider == nil || r.tools == nil {

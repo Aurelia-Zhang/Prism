@@ -1,0 +1,86 @@
+{
+  "suite_id": "e1-fixture-v1",
+  "version": 1,
+  "fixture": true,
+  "cases": [
+    {
+      "id": "text-completion",
+      "status": "succeeded",
+      "passed": true,
+      "steps": 1,
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 4
+      },
+      "latency_ms": 3,
+      "trace_id": "text-completion-span-1",
+      "span_count": 2,
+      "observed_text": "hello from fixture"
+    },
+    {
+      "id": "single-tool",
+      "status": "succeeded",
+      "passed": true,
+      "steps": 3,
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 6
+      },
+      "latency_ms": 7,
+      "trace_id": "single-tool-span-1",
+      "span_count": 4,
+      "observed_text": "tool complete"
+    },
+    {
+      "id": "validation-self-correction",
+      "status": "succeeded",
+      "passed": true,
+      "steps": 5,
+      "usage": {
+        "input_tokens": 24,
+        "output_tokens": 6
+      },
+      "latency_ms": 11,
+      "trace_id": "validation-self-correction-span-1",
+      "span_count": 6,
+      "observed_text": "corrected"
+    },
+    {
+      "id": "context-compact",
+      "status": "succeeded",
+      "passed": true,
+      "steps": 2,
+      "usage": {
+        "input_tokens": 14,
+        "output_tokens": 3
+      },
+      "latency_ms": 5,
+      "trace_id": "context-compact-span-1",
+      "span_count": 3,
+      "observed_text": "compacted"
+    },
+    {
+      "id": "failure-retry-routing",
+      "status": "succeeded",
+      "passed": true,
+      "steps": 7,
+      "usage": {
+        "input_tokens": 12,
+        "output_tokens": 8
+      },
+      "latency_ms": 15,
+      "trace_id": "failure-retry-routing-span-1",
+      "span_count": 8
+    }
+  ],
+  "metrics": {
+    "case_count": 5,
+    "success_rate": 1,
+    "average_steps": 3.6,
+    "input_tokens": 80,
+    "output_tokens": 27,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0,
+    "p50_latency_ms": 7
+  }
+}
