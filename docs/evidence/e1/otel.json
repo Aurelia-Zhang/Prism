@@ -1,0 +1,29 @@
+[
+  {
+    "name": "agent.run",
+    "status": "Ok",
+    "attributes": {
+      "prism.span_id": "text-completion-span-1",
+      "prism.status": "ok",
+      "prism.usage.cache_read_tokens": "0",
+      "prism.usage.cache_write_tokens": "0",
+      "prism.usage.input_tokens": "10",
+      "prism.usage.output_tokens": "4"
+    }
+  },
+  {
+    "name": "model.call",
+    "parent_name": "agent.run",
+    "status": "Ok",
+    "attributes": {
+      "prism.agent.round": "1",
+      "prism.parent_span_id": "text-completion-span-1",
+      "prism.span_id": "text-completion-span-2",
+      "prism.status": "ok",
+      "prism.usage.cache_read_tokens": "0",
+      "prism.usage.cache_write_tokens": "0",
+      "prism.usage.input_tokens": "10",
+      "prism.usage.output_tokens": "4"
+    }
+  }
+]

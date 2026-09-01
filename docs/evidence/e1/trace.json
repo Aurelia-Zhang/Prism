@@ -1,0 +1,35 @@
+{
+  "trace_id": "text-completion-span-1",
+  "spans": [
+    {
+      "id": "text-completion-span-1",
+      "name": "agent.run",
+      "status": "ok",
+      "start_time": "2026-01-02T03:04:05Z",
+      "end_time": "2026-01-02T03:04:05.003Z",
+      "start_sequence": 1,
+      "end_sequence": 2,
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 4
+      }
+    },
+    {
+      "id": "text-completion-span-2",
+      "name": "model.call",
+      "parent_span_id": "text-completion-span-1",
+      "status": "ok",
+      "start_time": "2026-01-02T03:04:05.001Z",
+      "end_time": "2026-01-02T03:04:05.002Z",
+      "start_sequence": 2,
+      "end_sequence": 1,
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 4
+      },
+      "attributes": {
+        "agent.round": "1"
+      }
+    }
+  ]
+}

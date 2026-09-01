@@ -1,5 +1,6 @@
 {
   "trace": {
+    "trace_id": "t1-span-1",
     "spans": [
       {
         "id": "t1-span-1",

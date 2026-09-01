@@ -103,7 +103,8 @@ type SpanSnapshot struct {
 
 // Snapshot is a deep copy of all spans in one run, ordered by start sequence.
 type Snapshot struct {
-	Spans []SpanSnapshot `json:"spans"`
+	TraceID string         `json:"trace_id,omitempty"`
+	Spans   []SpanSnapshot `json:"spans"`
 }
 
 // StartRun creates the agent.run root span.
@@ -219,7 +220,7 @@ func (r *Recorder) snapshot(rootID string) Snapshot {
 			states[j], states[j-1] = states[j-1], states[j]
 		}
 	}
-	snapshot := Snapshot{Spans: make([]SpanSnapshot, 0, len(states))}
+	snapshot := Snapshot{TraceID: rootID, Spans: make([]SpanSnapshot, 0, len(states))}
 	for _, state := range states {
 		snapshot.Spans = append(snapshot.Spans, SpanSnapshot{
 			ID:            state.id,
