@@ -2,6 +2,7 @@ package eval
 
 import (
 	"context"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -45,6 +46,33 @@ func TestCalculateMetricsUsesCaseResults(t *testing.T) {
 	if metrics.CaseCount != 3 || metrics.SuccessRate != 2.0/3.0 || metrics.AverageSteps != 4 || metrics.P50LatencyMS != 20 || metrics.InputTokens != 15 || metrics.CacheWriteTokens != 24 {
 		t.Fatalf("unexpected metrics: %#v", metrics)
 	}
+}
+
+func TestFixtureEvalDoesNotChangeCurrentRepositoryWorktreeState(t *testing.T) {
+	branchBefore := currentGitState(t, "branch", "--show-current")
+	worktreesBefore := currentGitState(t, "worktree", "list", "--porcelain")
+	statusBefore := currentGitState(t, "status", "--short", "--branch")
+	if _, err := RunSuite(context.Background(), FixtureSuite()); err != nil {
+		t.Fatal(err)
+	}
+	if got := currentGitState(t, "branch", "--show-current"); got != branchBefore {
+		t.Fatalf("current branch changed: before=%q after=%q", branchBefore, got)
+	}
+	if got := currentGitState(t, "worktree", "list", "--porcelain"); got != worktreesBefore {
+		t.Fatalf("current repository worktrees changed: before=%q after=%q", worktreesBefore, got)
+	}
+	if got := currentGitState(t, "status", "--short", "--branch"); got != statusBefore {
+		t.Fatalf("current repository status changed: before=%q after=%q", statusBefore, got)
+	}
+}
+
+func currentGitState(t *testing.T, args ...string) string {
+	t.Helper()
+	output, err := exec.Command("git", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, output)
+	}
+	return string(output)
 }
 
 func usage(input, output, read, write int64) provider.Usage {

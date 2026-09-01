@@ -274,15 +274,15 @@ func runAgentCase(ctx context.Context, item Case) (CaseResult, trace.Snapshot, e
 }
 
 func runOrchestrationCase(ctx context.Context, item Case) (CaseResult, trace.Snapshot, error) {
-	repo, err := repositoryRoot()
+	temp, err := os.MkdirTemp("", "prism-e1-eval-")
 	if err != nil {
 		return CaseResult{ID: item.ID}, trace.Snapshot{}, err
 	}
-	temp := filepath.Join(os.TempDir(), "prism-e1-eval-"+strconv.FormatInt(time.Now().UnixNano(), 10))
-	if err := os.MkdirAll(temp, 0o755); err != nil {
+	defer os.RemoveAll(temp)
+	repo, err := createFixtureRepository(temp)
+	if err != nil {
 		return CaseResult{ID: item.ID}, trace.Snapshot{}, err
 	}
-	defer os.RemoveAll(temp)
 	store, err := orchestration.OpenTaskStore(filepath.Join(temp, "tasks.db"))
 	if err != nil {
 		return CaseResult{ID: item.ID}, trace.Snapshot{}, err
@@ -431,10 +431,36 @@ func (fixtureWorker) Run(ctx context.Context, request orchestration.WorkerReques
 	return orchestration.WorkerResult{Status: orchestration.StatusSucceeded, Summary: "fixture worker succeeded", Usage: usage}, nil
 }
 
-func repositoryRoot() (string, error) {
-	output, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
-	if err != nil {
+func createFixtureRepository(parent string) (string, error) {
+	repo := filepath.Join(parent, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(output)), nil
+	if err := runFixtureGit(repo, "init", "-b", "main"); err != nil {
+		return "", err
+	}
+	if err := runFixtureGit(repo, "config", "user.email", "prism-e1-fixture@example.com"); err != nil {
+		return "", err
+	}
+	if err := runFixtureGit(repo, "config", "user.name", "Prism E1 Fixture"); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(repo, "README.txt"), []byte("Prism E1 local fixture\n"), 0o644); err != nil {
+		return "", err
+	}
+	if err := runFixtureGit(repo, "add", "README.txt"); err != nil {
+		return "", err
+	}
+	if err := runFixtureGit(repo, "commit", "-m", "fixture base"); err != nil {
+		return "", err
+	}
+	return repo, nil
+}
+
+func runFixtureGit(repo string, args ...string) error {
+	command := exec.Command("git", append([]string{"-C", repo}, args...)...)
+	if output, err := command.CombinedOutput(); err != nil {
+		return fmt.Errorf("git %v: %w: %s", args, err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }
