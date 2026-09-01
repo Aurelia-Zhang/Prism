@@ -1,0 +1,165 @@
+{
+  "project": "Prism",
+  "report_id": "e2-final-report",
+  "version": 1,
+  "generated_by": "E2 final evidence session (prism-E2-final-evidence); manual aggregation of numbers already produced by checked-in tests and artifacts. No new benchmark was run and no dataset was modified for this report.",
+  "evidence_sources": [
+    "docs/evidence/t1/trace.json",
+    "docs/evidence/t2/fixture-summary.md",
+    "docs/evidence/t2/mcp-subprocess-transcript.md",
+    "docs/evidence/t2/live-smoke-summary.md",
+    "docs/evidence/c1/report.md",
+    "docs/evidence/o1/report.md",
+    "docs/evidence/e1/eval-report.json",
+    "docs/evidence/e1/eval-report.md"
+  ],
+  "evidence_class_note": "All numbers below come from local fixtures: a scripted fake provider, deterministic summarizer and embedding fixtures, a local test-executable Worker, and an in-memory OpenTelemetry exporter. No live OpenAI, Anthropic, third-party MCP, OpenCode/Codex Worker, or remote OTLP run was recorded.",
+  "t1_agent_runtime": {
+    "evidence_class": "fixture",
+    "artifact": "docs/evidence/t1/trace.json",
+    "verified_by": "internal/agent TestTraceArtifact regenerates and byte-compares the artifact",
+    "conversation_shape": "4 provider calls, 9 spans in trace t1-span-1 (agent.run, model.call, tool.call)",
+    "usage_aggregate": {
+      "input_tokens": 37,
+      "output_tokens": 11,
+      "cache_read_tokens": 1,
+      "cache_write_tokens": 1
+    },
+    "self_correction": {
+      "round_1": "tool 'strict' called with {\"value\":9}; JSON Schema rejected it as tool_arguments_schema_invalid and the error was fed back as a tool result",
+      "round_2": "model re-called 'strict' with {\"value\":\"fixed\"} and succeeded"
+    },
+    "parallel_tools": {
+      "round_3": "tools 'alpha' and 'beta' were called in the same round; the test blocks each handler on a channel, proving concurrent execution",
+      "feedback_order": "results were appended back in call order (alpha-call, beta-call)"
+    },
+    "baseline": "未提供可比 baseline：T1 is the first runtime version; there is no previous Prism implementation or live run to compare against."
+  },
+  "t2_providers_mcp": {
+    "evidence_class": "local httptest fixtures and local MCP child-process fixtures; not live compatibility evidence",
+    "openai_responses_fixture": {
+      "sse_events_in": 6,
+      "ordered_items_out": 3,
+      "usage": { "input_tokens": 11, "output_tokens": 7 },
+      "behaviors": "duplicate item IDs collapsed; reasoning.encrypted_content requested as opaque continuation; rate_limit honors Retry-After; partial stream is not retried"
+    },
+    "anthropic_messages_fixture": {
+      "sse_events_in": 11,
+      "ordered_items_out": 2,
+      "usage": { "input_tokens": 5, "output_tokens": 4, "cache_read_tokens": 2, "cache_write_tokens": 3 },
+      "behaviors": "thinking with signature kept opaque; tool-use JSON arguments aggregated; ping and unknown envelopes ignored or marked stream_protocol"
+    },
+    "mcp_subprocess_scenarios": {
+      "count": 4,
+      "names": ["lifecycle (initialize/list/call)", "cancellation (notifications/cancelled)", "server exit (bounded stderr, own-tool removal)", "rpc-error (code -32001)"]
+    },
+    "live_smoke": "not run: no OPENAI_API_KEY, ANTHROPIC_API_KEY, or PRISM_MCP_EXTERNAL_COMMAND was provided; opt-in tests were skipped",
+    "baseline": "未提供可比 baseline：fixture event counts are protocol-coverage observations, not throughput or latency measurements."
+  },
+  "c1_context_memory": {
+    "evidence_class": "deterministic summarizer and embedding fixtures; estimated tokens use Prism's stable 4-runes-per-token estimate, not a provider tokenizer",
+    "artifact": "docs/evidence/c1/report.md",
+    "context_compaction": {
+      "case": "internal/context TestCompactKeepsStructuredSummaryRecentRoundsAndToolPair (3-round conversation, newest 2 rounds retained, tool call + result kept as one round)",
+      "before_estimated_tokens": 362,
+      "after_estimated_tokens": 176,
+      "reduction_pct": 51.4,
+      "before_messages": 9,
+      "after_messages": 8,
+      "baseline": "before/after on the same conversation is the only comparison; no provider-tokenizer or uncompressed-live-run baseline exists"
+    },
+    "large_output": {
+      "case": "internal/agent TestRunOptionalC1RuntimeRecallsCompactsAndPersistsOutput (tool returns 4096 'x' bytes)",
+      "original_bytes": 4096,
+      "provider_facing_metadata_bytes": 327,
+      "reduction_pct": 92.0,
+      "retrieval": "full bytes persisted with SHA-256 metadata; fetch_output returns byte ranges with original size"
+    },
+    "retrieval": {
+      "fixture": "1 query ('database'), 2 relevant entries, 1 non-relevant entry, k=1",
+      "bm25_hit_at_1": 1.0,
+      "vector_hit_at_1": 1.0,
+      "hybrid_rrf_hit_at_1": 1.0,
+      "top1_results": { "bm25": "database indexing", "vector": "sqlite database", "hybrid_rrf": "database indexing" },
+      "sample_size_note": "sample size is 1 query; this is a hand-written relevance fixture, not a retrieval benchmark"
+    },
+    "baseline": "未提供可比 baseline for retrieval quality：no external corpus, no real embedding service, no pre-existing Prism memory system."
+  },
+  "o1_orchestration": {
+    "evidence_class": "single recorded local run; Worker is the Go test executable as a fixture, not OpenCode/Codex; temporary git worktrees, no merge",
+    "artifact": "docs/evidence/o1/report.md",
+    "scenario_shape": {
+      "parent_tasks": 1,
+      "strategies": 2,
+      "total_attempts": 3,
+      "worktrees_created": 3
+    },
+    "retry": {
+      "flaky_attempt_1": "queued -> running -> failed",
+      "flaky_attempt_2": "retry -> queued -> running -> succeeded"
+    },
+    "routing": {
+      "initial_reason": "tool_required=true and complexity=5 fit the balanced profile",
+      "retry_reason": "retry history=1 requires a stronger profile"
+    },
+    "arbitration": {
+      "rule": "succeeded => 100 + changed_files",
+      "candidate_scores": { "stable": 101, "flaky_attempt_2": 101 },
+      "tie_break": "lexical task ID",
+      "winner": "task-1788189934305725000-8 (stable)"
+    },
+    "durations_local_single_run": {
+      "stable_attempt_1_ms": 90.323,
+      "flaky_attempt_1_ms": 90.304,
+      "flaky_attempt_2_ms": 78.539,
+      "note": "single local run including subprocess startup; not a latency benchmark"
+    },
+    "usage": {
+      "stable_attempt_1": { "input_tokens": 11, "output_tokens": 7 },
+      "flaky_attempt_1": { "input_tokens": 5, "output_tokens": 3 },
+      "flaky_attempt_2": { "input_tokens": 11, "output_tokens": 7 }
+    },
+    "baseline": "未提供可比 baseline：no previous orchestration implementation and no live Worker comparison exists."
+  },
+  "e1_observability_eval": {
+    "evidence_class": "fixture suite e1-fixture-v1: fake provider, deterministic compactor, local Worker; in-memory OTel exporter",
+    "artifact": "docs/evidence/e1/eval-report.json (fact source) and eval-report.md",
+    "verified_by": "internal/eval TestE1EvidenceArtifacts re-runs the suite and byte-compares the artifacts",
+    "suite": { "case_count": 5, "passed": 5, "success_rate": 1.0 },
+    "metrics": {
+      "average_steps": 3.6,
+      "input_tokens": 80,
+      "output_tokens": 27,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "p50_latency_ms": 7
+    },
+    "per_case": [
+      { "id": "text-completion", "steps": 1, "latency_ms": 3 },
+      { "id": "single-tool", "steps": 3, "latency_ms": 7 },
+      { "id": "validation-self-correction", "steps": 5, "latency_ms": 11 },
+      { "id": "context-compact", "steps": 2, "latency_ms": 5 },
+      { "id": "failure-retry-routing", "steps": 7, "latency_ms": 15 }
+    ],
+    "deliberate_omissions": "P95, significance testing, LLM-as-Judge, and model comparison are intentionally absent at 5 cases",
+    "baseline": "未提供可比 baseline：no earlier Prism suite, no live-provider run, and no model comparison was produced."
+  },
+  "claim_states_after_audit": {
+    "verified": ["B0 contracts", "T1 agent runtime/tool/trace", "E1 fixture eval runner (fixture evidence only)"],
+    "partial": [
+      "T2 external OpenAI/Anthropic/third-party MCP compatibility",
+      "C1 real summarizer and embedding quality",
+      "O1 OpenCode/Codex live Worker compatibility",
+      "E1 remote OTLP, live provider, and Judge"
+    ],
+    "planned": []
+  },
+  "limitations": [
+    "No live provider or external system was called for any number in this report.",
+    "Latency figures are fixture-embedded durations from one local run; they are not performance measurements of Prism.",
+    "Token counts in C1 are stable 4-runes-per-token estimates, not provider tokenizer counts.",
+    "Retrieval Hit@1 is based on one hand-written query; it demonstrates wiring, not ranking quality.",
+    "O1 durations include local subprocess startup on one machine with sample size 1.",
+    "E1 metrics cover 5 fixture cases; no statistical claim is made."
+  ]
+}

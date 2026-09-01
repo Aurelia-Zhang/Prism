@@ -1,40 +1,56 @@
 # Prism
 
-Prism is a trace-first Agent Harness being rebuilt in Go for an autumn-recruiting portfolio.
+Prism is a trace-first, provider-neutral Agent Harness written in Go. It is a personal
+autumn-recruiting project: one compact, fully tested core path — agent loop, providers,
+tools, context, memory, orchestration, observability, and eval — that can be explained
+end to end, with every capability claim tied to code, tests, and checked-in evidence.
 
-## Current status
+## What Prism does today
 
-The repository currently contains:
+- **Agent loop** (`internal/agent`) — provider-neutral run loop with cancellation,
+  max-round limits, stop-reason/output consistency checks, and ordered conversation
+  messages, tool results, usage, and errors.
+- **Providers** (`internal/provider`) — OpenAI Responses and Anthropic Messages
+  streaming adapters with ordered SSE aggregation, opaque continuation items,
+  normalized errors, bounded retry, and `Retry-After` support.
+- **Tools** (`internal/tool`) — a JSON Schema tool registry; same-round tools execute
+  concurrently, results feed back in call order, and validation errors return to the
+  model for self-correction.
+- **MCP** (`internal/mcp`) — an stdio MCP client for initialize, tool discovery,
+  namespaced registration, calls, cancellation, bounded stderr, and exit cleanup.
+- **Context and memory** (`internal/context`, `internal/memory`, `internal/output`) —
+  structured compaction that keeps recent rounds and tool pairs, SQLite
+  session/project/long-term memory with BM25 + vector-cosine + RRF hybrid recall, and
+  large-output persistence with `fetch_output` byte-range retrieval.
+- **Orchestration** (`internal/orchestration`) — a persistent task state machine,
+  isolated git worktrees, JSON subprocess Workers, retry, rule-based model routing
+  with recorded reasons, and deterministic fan-out arbitration.
+- **Observability** (`internal/observability`) — schema-version-1 SQLite trace
+  persistence, stable timeline replay, and OpenTelemetry SDK export with
+  content-safe `prism.*` attributes.
+- **Eval** (`internal/eval`) — a five-case versioned fixture suite executed against
+  the real Runner and orchestration Manager, with JSON fact-source and Markdown
+  metric reports.
 
-- a minimal CLI with `help` and `version` behavior;
-- a Provider-neutral internal Agent Loop with cancellation and round limits;
-- a JSON Schema Tool Registry with same-round parallel execution and ordered result feedback;
-- an in-memory Trace Recorder for `agent.run`, `model.call`, and `tool.call` spans;
-- optional Provider streaming with OpenAI Responses and Anthropic Messages adapters, bounded retry,
-  normalized errors, and opaque continuation items;
-- an MCP stdio client for initialize, tool discovery, namespaced registration, and tool calls;
-- optional C1 context compaction with structured summaries, SQLite session/project/long-term memory,
-  BM25/vector hybrid recall, and large-output persistence with `fetch_output` retrieval;
-- a local O1 orchestration package with persistent task/attempt state, rule-based model routing,
-  isolated Git worktrees, JSON command Workers, retry, fan-out, and deterministic arbitration;
-- schema-version-1 SQLite Trace persistence, stable timeline replay, and official OpenTelemetry
-  SDK export with `prism.*` content-safe attributes;
-- a versioned fixture Eval suite with real Agent Runner/O1 Manager execution and JSON/Markdown
-  reports for steps, token buckets, success rate, and P50 latency;
-- the B / T / C / O / E delivery Roadmap;
-- collaboration, MR, and resume-evidence contracts.
+## Architecture
 
-The adapters, MCP client, O1 Worker path, and E1 Eval path are covered by readable local fixtures.
-External OpenAI, Anthropic, third-party MCP, OpenCode/Codex Worker, and remote OTLP compatibility
-is opt-in and remains `partial` until the corresponding live smoke is recorded. C1 uses
-deterministic summarizer/embedding fixtures and remains `partial`; O1 deliberately does not merge
-worktrees. E1 does not export API keys, complete prompts, tool arguments/output, or reasoning.
-See [ROADMAP.md](ROADMAP.md) and [docs/resume-evidence.md](docs/resume-evidence.md) for evidence
-state and limits.
+```text
+user turn
+  -> Agent Loop: memory recall -> context compaction -> provider call (stream + retry)
+       -> JSON Schema tool validation -> concurrent execution -> ordered feedback
+       -> large-output persistence                                  [internal/agent]
+  -> Trace Recorder: agent.run / model.call / tool.call spans      [internal/trace]
+       -> SQLite persistence -> OTel export / timeline replay      [internal/observability]
+  -> Eval suite over real Runner + Manager results                 [internal/eval]
 
-## Run the current CLI
+Manager path: task state machine -> routing -> git worktree -> Worker subprocess
+  -> structured result -> retry / fan-out arbitration -> persisted state + trace
+                                                              [internal/orchestration]
+```
 
-Prism requires Go 1.24 or newer.
+## Quickstart
+
+Requires Go 1.24 or newer.
 
 ```bash
 go run ./cmd/prism version
@@ -44,15 +60,52 @@ go run ./cmd/prism trace export <db-path> <trace-id>
 go run ./cmd/prism eval run fixture --output docs/evidence/e1/eval-report.json
 ```
 
-`trace show/export` read persisted spans only and never re-run a Provider or Tool. The explicit
-`fixture` selector runs the five local E1 scenarios; the command also writes a Markdown report next
-to the JSON fact source.
+One command to reproduce the headline scenario metrics:
 
-## Project boundaries
+```bash
+go test ./internal/eval -run TestFixtureSuiteRunsFiveRealScenarios -count=1 -v
+```
 
-The goal is a real, measurable, Provider-neutral core that can be explained in interviews. Prism
-does not target high availability, distributed consistency, exhaustive protocol compatibility,
-or a production security platform.
+## Metrics summary
+
+All numbers are fixture/local and come from checked-in artifacts regenerated by tests;
+see [`docs/metrics/final-report.md`](docs/metrics/final-report.md) for sample sizes,
+baselines, and limits.
+
+| Area | Result | Evidence class |
+|---|---|---|
+| Context compaction | 362 -> 176 estimated tokens (9 -> 8 messages) | deterministic fixture |
+| Large tool output | 4096 -> 327 provider-facing bytes | deterministic fixture |
+| Hybrid recall | BM25 / vector / RRF Hit@1 = 1.0 (1 query, k=1) | hand-written fixture |
+| Fixture eval | 5/5 cases, avg 3.6 steps, P50 7 ms | fake provider + local Worker |
+
+## Roadmap status
+
+| Item | Status | Scope |
+|---|---|---|
+| B0 | verified | contracts, roadmap, evidence ledger |
+| T1 | verified | agent loop, tools, trace |
+| T2 | partial | providers and MCP verified by local fixtures; live compatibility not recorded |
+| C1 | partial | compaction and memory verified with deterministic fixtures; real quality not measured |
+| O1 | partial | orchestration verified with a local Worker fixture; OpenCode/Codex compatibility not recorded |
+| E1 | partial | SQLite trace, replay, OTel export, and fixture eval verified; remote OTLP and live runs not recorded |
+| E2 | verified | final metrics report, claim audit, and interview evidence (this repository state) |
+
+Details: [ROADMAP.md](ROADMAP.md), [docs/resume-evidence.md](docs/resume-evidence.md),
+[docs/resume-bullets.md](docs/resume-bullets.md), [docs/interview-deep-dive.md](docs/interview-deep-dive.md).
+
+## Known limitations
+
+- No live OpenAI, Anthropic, third-party MCP, OpenCode/Codex Worker, or remote OTLP run
+  has been recorded; those compatibility claims stay `partial`. Live smokes are opt-in
+  via environment variables and were skipped without credentials.
+- C1 summarization and embeddings are deterministic fixtures; token counts are a stable
+  4-runes-per-token estimate, not a provider tokenizer.
+- O1 deliberately does not merge worktrees; token usage is recorded but no currency cost
+  is calculated.
+- Eval covers five fixture cases; no P95, significance testing, or model comparison.
+- Prism does not target high availability, distributed consistency, exhaustive protocol
+  compatibility, or a production security platform.
 
 ## License
 
